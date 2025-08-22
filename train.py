@@ -196,7 +196,7 @@ def train(args):
 
     # class_names = desc.dataset_dict[args.dataset]
     train_data = dataset.Dataset(args.data_path, transform, target_transform, args)    
-    test_data = dataset.Dataset([f'/datasets/{args.dataset_category}/visa/'], transform, target_transform, args)
+    test_data = dataset.Dataset([f'/data/alireza/datasets/{args.dataset_category}/visa/'], transform, target_transform, args)
 
     train_loader = DataLoader(train_data, batch_size=8, shuffle=True,  
                                 num_workers=8, pin_memory=True, prefetch_factor=2)    
@@ -210,7 +210,7 @@ def train(args):
     
     # load model
     device = 'cuda'
-    tips_vision_encoder, tips_text_encoder, tokenizer, temperature = tips.load_model.get_model('~/.cache/tips/', 'L', False)
+    tips_vision_encoder, tips_text_encoder, tokenizer, temperature = tips.load_model.get_model('/home/alireza/.cache/tips/', 'L', False)
     tips_text_encoder = turn_gradient_off(tips_text_encoder)
     tips_vision_encoder = turn_gradient_off(tips_vision_encoder)
     
@@ -381,7 +381,7 @@ if __name__ == '__main__':
         print(args)
         setup_seed(args.seed)
         args.log_dir = make_human_readable_name(args)
-        args.data_path = [f'/datasets/{args.dataset_category}/{ds}/' for ds in args.dataset]
+        args.data_path = [f'/data/alireza/datasets/{args.dataset_category}/{ds}/' for ds in args.dataset]
         args.experiment_root = f'./workspaces/trained_on_{"_".join(args.dataset)}_{args.model_name}/{args.log_dir}'
         args.save_path = f'{args.experiment_root}/checkpoints'
         os.makedirs(args.save_path, exist_ok=True)

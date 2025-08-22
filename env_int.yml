@@ -1,4 +1,4 @@
-name: /miniconda3/envs/cuda11_8torch2_5
+name: /home/alireza/miniconda3/envs/cuda11_8torch2_5
 channels:
   - pytorch
   - nvidia
@@ -329,4 +329,4 @@ dependencies:
       - opencv-python==4.11.0.86
       - sentencepiece==0.2.0
       - tabulate==0.9.0
-prefix: /miniconda3/envs/cuda11_8torch2_5
+prefix: /home/alireza/miniconda3/envs/cuda11_8torch2_5

@@ -57,7 +57,7 @@ def test(args):
     
     # load model
     device = 'cuda'
-    tips_vision_encoder, tips_text_encoder, tokenizer, temperature = tips.load_model.get_model('~/.cache/tips/', 'L', False)
+    tips_vision_encoder, tips_text_encoder, tokenizer, temperature = tips.load_model.get_model('/home/alireza/.cache/tips/', 'L', False)
     text_encoder = omaly.text_encoder(tokenizer, tips_text_encoder.to(device), 64, args.prompt_learn_method)
     vision_encoder = omaly.vision_encoder(tips_vision_encoder.to(device))
 
@@ -196,7 +196,7 @@ if __name__ == '__main__':
     else:
         setup_seed(args.seed)
 
-        args.data_path = [f'/datasets/{args.dataset_category}/{args.dataset}/']
+        args.data_path = [f'/data/alireza/datasets/{args.dataset_category}/{args.dataset}/']
         if not args.checkpoint_path:
             args.log_dir = make_human_readable_name(args)
             args.save_path = f'./workspaces/{args.model_name}/{args.log_dir}/quantative/NoTrain/{args.dataset}'
