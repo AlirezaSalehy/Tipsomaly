@@ -263,8 +263,77 @@ class Transformer(nn.Module):
         for _ in range(self.layers)
     ])
 
-  def forward(self, x: torch.Tensor, mask: torch.Tensor):
-    return self.resblocks(x, mask)[0]
+
+  def _concat_mask(self, mask: torch.Tensor, n_deep: int, after_bos: bool) -> torch.Tensor:
+      if mask is None:
+          return None
+      if mask.dim() == 2:                        # (B, L), 1/True = keep
+          B, L = mask.shape
+          deep_vis = torch.ones(B, n_deep, dtype=mask.dtype, device=mask.device)
+          if after_bos and L >= 1:
+              return torch.cat([mask[:, :1], deep_vis, mask[:, 1:]], dim=1)
+          else:
+              return torch.cat([deep_vis, mask], dim=1)
+      elif mask.dim() == 4:                      # (B, 1, 1, L), additive mask (0 keep)
+          B, _, _, L = mask.shape
+          deep_vis = torch.zeros(B, 1, 1, n_deep, dtype=mask.dtype, device=mask.device)
+          if after_bos and L >= 1:
+              return torch.cat([mask[..., :1], deep_vis, mask[..., 1:]], dim=-1)
+          else:
+              return torch.cat([deep_vis, mask], dim=-1)
+      else:
+          raise ValueError(f"Unsupported mask shape: {mask.shape}")
+
+  def forward(
+      self,
+      x: torch.Tensor,
+      mask: torch.Tensor,
+      deep_tokens: nn.ParameterList = None,
+      *,
+      after_bos: bool = False  # place prompts after BOS/CLS at position 0
+  ) -> torch.Tensor:
+      """
+      If deep_tokens is provided, insert n_deep tokens at the input of layers
+      [insert_start_layer, insert_start_layer + len(deep_tokens)) and strip them after each block.
+      """
+      # fast path: no deep tokens
+      if not deep_tokens:
+          for block in self.resblocks:
+              x, mask = block(x, mask)
+          return x
+
+      # shapes/sizes
+      B, L, D = x.shape
+      n_deep = deep_tokens[0].shape[0]  # number of deep tokens per tuned layer
+      d_deep = len(deep_tokens)         # number of layers to tune
+      start = 1 # max(0, int(self.insert_start_layer))
+      end = min(start + d_deep, len(self.resblocks))
+
+      # sanity checks
+      for t in deep_tokens:
+          assert t.shape == (n_deep, D), f"Each deep token tensor must be (n_deep={n_deep}, D={D}), got {t.shape}"
+
+      for i, block in enumerate(self.resblocks):
+          if start <= i < end:
+              # select layer-specific deep tokens and expand across batch
+              pt = deep_tokens[i - start].unsqueeze(0).expand(B, -1, -1)  # (B, n_deep, D)
+
+              # place after BOS/CLS if present, otherwise at pure prefix
+              if after_bos and L >= 1:
+                  x_ext = torch.cat([x[:, :1], pt, x[:, 1:]], dim=1)      # [BOS] + deep + tokens
+              else:
+                  x_ext = torch.cat([pt, x], dim=1)                        # deep + tokens
+
+              mask_ext = self._concat_mask(mask, n_deep, after_bos=(after_bos and L >= 1))
+              y, _ = block(x_ext, mask_ext)
+              if after_bos and L >= 1:
+                  x = torch.cat([y[:, :1], y[:, 1 + n_deep:]], dim=1)
+              else:
+                  x = y[:, n_deep:, :]
+          else:
+              x, _ = block(x, mask)
+
+      return x
 
 def squeeze_multiple(tensor: torch.Tensor, dims: list) -> torch.Tensor:
     """Dynamically squeezes specified singleton dimensions from a tensor.
@@ -379,6 +448,7 @@ class TextEncoder(nn.Module):
       paddings: torch.tensor,
       learnable_prompts: torch.Tensor = None,  # New parameter for learnable prompts
       learning_method: str = None, # But addition can also be used [concat, sumate, entire_learnable, None]
+      deep_parameters: torch.nn.ParameterList = None,
       device = 'cuda',
   ):
     # """Applies TextEncoder module."""
@@ -441,7 +511,7 @@ class TextEncoder(nn.Module):
     x = x + self.pos_embedder(seq_length=original_seq_length).to(device)
     x = x.permute(1, 0, 2)  # [L, B, D]
     mask = (paddings == 0).float().permute(1, 0)  # [L, B]
-    x = self.transformer(x, mask)
+    x = self.transformer(x, mask, deep_tokens=deep_parameters)
     x = x.permute(1, 0, 2)  # [B, L, D]
     x = self.ln_final(x)
     x = self.pooling(x, compatible_paddings=paddings[:, :, None])

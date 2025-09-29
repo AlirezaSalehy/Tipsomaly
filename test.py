@@ -23,6 +23,9 @@ from utils.metrics import image_level_metrics, pixel_level_metrics
 from utils.visualize import visualizer
 from utils.logger import get_logger, read_train_args
 
+# def pixel_level_metrics(a,b,c):
+    # return 0
+
 def setup_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -46,51 +49,79 @@ def regrid_upsample_smooth(flat_scores, size, sigma):
 def test(args):
     logger = get_logger(args.save_path)
     # load dataset 
-    image_size = 448 #224 if is_low_res else 448
+    image_size = 518 #224 if is_low_res else 448
     transform, target_transform = input_transforms.create_transforms(image_size)
+
+    # load model
+    device = 'cuda'
+    tips_vision_encoder, tips_text_encoder, tokenizer, temperature = tips.load_model.get_model(args.models_dir, args.model_version)
+    text_encoder = omaly.text_encoder(tokenizer, tips_text_encoder.to(device), 64, args.prompt_learn_method, args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
+    vision_encoder = omaly.vision_encoder(tips_vision_encoder.to(device))
 
     # class_names = desc.dataset_dict[args.dataset]
     test_data = dataset.Dataset(args.data_path, transform, target_transform, args)
-    test_loader = DataLoader(test_data, batch_size=8, shuffle=False)
-    prompt_class_names = [clss.replace('_', ' ') for clss in test_data.cls_names]
-    prompt_class_ids = test_data.class_ids
+    test_loader = DataLoader(test_data, batch_size=8, shuffle=True)
+    fixed_class_names = [clss.replace('_', ' ') for clss in test_data.cls_names]
     
-    # load model
-    device = 'cuda'
-    tips_vision_encoder, tips_text_encoder, tokenizer, temperature = tips.load_model.get_model('/home/alireza/.cache/tips/', 'L', False)
-    text_encoder = omaly.text_encoder(tokenizer, tips_text_encoder.to(device), 64, args.prompt_learn_method)
-    vision_encoder = omaly.vision_encoder(tips_vision_encoder.to(device))
-
-    if args.checkpoint_path:
-        assert not args.prompt_learn_method is None, 'The prompt_learn_method should not be none'
-        text_encoder.learnable_parameters = torch.load(args.params_path)
-        prompt_class_names = ['object']
-        prompt_class_ids = torch.tensor([0])
-        print('The learnable prompts are read')
-        
     # extract features
     with torch.no_grad():
-        text_features = text_encoder(prompt_class_names, device)
-
+        # Fixed prototypes
+        fixed_text_features = text_encoder(fixed_class_names, device, learned=False)
+        fixed_text_features = fixed_text_features / fixed_text_features.norm(dim=-1, keepdim=True) # NOTE: For test also 
+    cls_text_features, seg_text_features = fixed_text_features, fixed_text_features
+    
+    if args.checkpoint_path:
+        assert not args.prompt_learn_method == 'none', 'The prompt_learn_method should not be none'
+        chekpoint = torch.load(args.params_path, weights_only=False)
+        # text_encoder.learnable_prompts = chekpoint["learnable_prompts"]
+        text_encoder.learnable_prompts = chekpoint
+        # text_encoder.deep_parameters = chekpoint["deep_parameters"]
+        
+        learnable_class_names = ['object']
+        learnable_class_ids = torch.tensor([0])
+        print('The learnable prompts are read')
+        
+        # extract features
+        with torch.no_grad():
+            # Learnable prototypes
+            learnable_text_features = text_encoder(learnable_class_names, device, learned=True) # NOTE: important learned=True
+            learnable_text_features = learnable_text_features / learnable_text_features.norm(dim=-1, keepdim=True) # NOTE: For test also 
+        cls_text_features, seg_text_features = learnable_text_features, learnable_text_features
+    
+    if args.checkpoint_path and args.decoupled_prompt:
+        cls_text_features, seg_text_features = fixed_text_features, learnable_text_features
+        
     dataset_preds = {cls_id: {'name': test_loader.dataset.cls_names[cls_id], 'img_scrs': [], 'img_lbls': [], 'pxl_scrs': [], 'pxl_lbls': [], 'paths': []} for cls_id in test_loader.dataset.class_ids}
     for batch in tqdm(test_loader, desc="Extracting features", unit="batch"):
         image = batch['img'].to(device)
-        cls_ids = batch['cls_id']
         label = batch['anomaly'].long().to(device)
         abnorm_mask = batch['abnorm_mask'].squeeze(dim=1).to(device)
         path = batch['img_path']
         
+        # Indecies
+        cls_class_ids, seg_class_ids = batch['cls_id'], batch['cls_id']
+        if args.checkpoint_path and args.decoupled_prompt:
+            seg_class_ids = learnable_class_ids
+        elif args.checkpoint_path and not args.decoupled_prompt:
+            cls_class_ids, seg_class_ids = learnable_class_ids, learnable_class_ids
+
         with torch.no_grad():
             vision_features = vision_encoder(image)
-            
+            vision_features = [feature / feature.norm(dim=-1, keepdim=True) for feature in vision_features] # NOTE: for test also
+
             # calculate normal/abnormal scores
-            img_scr0 = calc_score(vision_features[0], text_features[prompt_class_ids], temperature).squeeze(dim=1).detach() # prompt_class_ids cls_ids
-            img_scr1 = calc_score(vision_features[1], text_features[prompt_class_ids], temperature).squeeze(dim=1).detach()
+            img_scr0 = calc_score(vision_features[0], cls_text_features[cls_class_ids], temperature).squeeze(dim=1).detach() # prompt_class_ids cls_ids
+            img_scr1 = calc_score(vision_features[1], cls_text_features[cls_class_ids], temperature).squeeze(dim=1).detach()
             
-            img_map = calc_score(vision_features[2], text_features[prompt_class_ids], temperature)
+            img_map = calc_score(vision_features[2], seg_text_features[seg_class_ids], temperature)
+            if args.aggregate_local2global:
+                max_local = torch.max(img_map, dim=1)[0]
+                img_scr0 = img_scr0 + max_local
+                img_scr1 = img_scr1 + max_local
+                
             pxl_scr = regrid_upsample_smooth(img_map.detach(), image_size, args.sigma)
             
-        for idx, cls_id in enumerate(cls_ids.cpu().numpy()):
+        for idx, cls_id in enumerate(batch['cls_id'].cpu().numpy()):
             dataset_preds[cls_id]['img_scrs'].append([img_scr0[idx][1].cpu(), img_scr1[idx][1].cpu()])
             dataset_preds[cls_id]['img_lbls'].append(label[idx].cpu())
             dataset_preds[cls_id]['pxl_scrs'].append(pxl_scr[idx].cpu())
@@ -108,7 +139,8 @@ def test(args):
         pxl_lbls = torch.stack(dataset_preds[cls_id]['pxl_lbls'], dim=0)
     
         for px_mtr in args.pixel_metrics:
-            cls_results.append(pixel_level_metrics(pxl_prds, pxl_lbls, px_mtr)*100)
+            if not px_mtr == '':
+                cls_results.append(pixel_level_metrics(pxl_prds, pxl_lbls, px_mtr)*100)
             
         for im_mtr in args.image_metrics:
             for col in range(img_prds.shape[1]):
@@ -183,8 +215,17 @@ if __name__ == '__main__':
     parser.add_argument("--log_dir", type=str, default="")
     
     ##########################
-
-    parser.add_argument("--prompt_learn_method", type=str, default=None, choices=['concat', 'sumate', 'entire_learnable', 'none'])
+    parser.add_argument("--model_version", type=str, default='l14h', choices=["s14h","b14h","l14h","so4h","g14l","g14h"])
+    parser.add_argument("--models_dir", type=str, default='/home/alireza/.cache/tips/')
+    
+    parser.add_argument("--n_deep_tokens", type=int, default=0)
+    parser.add_argument("--d_deep_tokens", type=int, default=0)
+    parser.add_argument("--n_prompt", type=int, default=8)
+    parser.add_argument("--fixed_prompt_type", type=str, default='industrial', choices=['industrial', 'medical_low', 'medical_high', 'object_agnostic'])
+    
+    parser.add_argument("--prompt_learn_method", type=str, default='concat', choices=['concat', 'sumate', 'entire_learnable', 'none'])
+    parser.add_argument("--decoupled_prompt", type=str2bool, default=True)
+    parser.add_argument("--aggregate_local2global", type=str2bool, default=True)
     
     args = parser.parse_args()
     if 'CUDA_VISIBLE_DEVICES' not in os.environ:

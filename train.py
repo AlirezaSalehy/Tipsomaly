@@ -25,6 +25,12 @@ from utils.loss import FocalLoss, BinaryDiceLoss
 from utils.visualize import visualizer
 from utils.logger import save_args_to_file, get_logger
 
+from collections import defaultdict
+
+loss_names = {'img_ls_ce': 'LS CE', 'pxl_ls_fc': 'LS FC', \
+                'plx_ls_dc_p': 'LS DC P', 'plx_ls_dc_n': 'LS DC N', \
+                'emb_l1_nrm': 'LS L1 NRM', 'epc_ls': 'total'}
+
 def setup_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -189,9 +195,9 @@ def train(args):
     logger = get_logger(args.experiment_root)
     
     # load dataset 
-    image_size = 448 #224 if is_low_res else 448
+    image_size = 518 # 448 #224 if is_low_res else 448
     learning_rate = 0.001
-    epochs = 5
+    epochs = args.epoch
     transform, target_transform = input_transforms.create_transforms(image_size)
 
     # class_names = desc.dataset_dict[args.dataset]
@@ -210,11 +216,11 @@ def train(args):
     
     # load model
     device = 'cuda'
-    tips_vision_encoder, tips_text_encoder, tokenizer, temperature = tips.load_model.get_model('/home/alireza/.cache/tips/', 'L', False)
+    tips_vision_encoder, tips_text_encoder, tokenizer, temperature = tips.load_model.get_model(args.models_dir, args.model_version)
     tips_text_encoder = turn_gradient_off(tips_text_encoder)
     tips_vision_encoder = turn_gradient_off(tips_vision_encoder)
     
-    text_encoder = omaly.text_encoder(tokenizer, tips_text_encoder.to(device), 64, args.prompt_learn_method)
+    text_encoder = omaly.text_encoder(tokenizer, tips_text_encoder.to(device), 64, args.prompt_learn_method, args.prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
     vision_encoder = omaly.vision_encoder(tips_vision_encoder.to(device))
     
     # Define losses 
@@ -223,9 +229,13 @@ def train(args):
     loss_dice = BinaryDiceLoss()
     
     # Define optimizer
-    optimizer = torch.optim.Adam(text_encoder.learnable_parameters, lr=learning_rate, betas=(0.5, 0.999))  
-    
-    train_stats = {'img_ls_ce': [], 'pxl_ls_fc': [], 'plx_ls_dc_p': [], 'plx_ls_dc_n': [], 'epc_ls': []}
+    optimizer = torch.optim.Adam(
+        list(text_encoder.learnable_prompts),# + list(text_encoder.deep_parameters),
+        lr=learning_rate,
+        betas=(0.5, 0.999)
+    )
+    train_stats = defaultdict(list)
+
     torch.autograd.set_detect_anomaly(True)
     train_loader_cpu = [bat for bat in train_loader]
     
@@ -236,10 +246,12 @@ def train(args):
     # args.visualize = True
         
     text_encoder.train() 
+    text_encoder.to(device)
     vision_encoder.train() 
+    vision_encoder.to(device)
     for epoch in range(epochs):  # Add epoch loop
         print(f"Epoch {epoch + 1}/{epochs}")
-        epoch_loss = {'img_ls_ce': 0, 'pxl_ls_fc': 0, 'plx_ls_dc_p': 0, 'plx_ls_dc_n': 0, 'epc_ls': 0}
+        epoch_loss = defaultdict(int)
         
         for batch in tqdm(train_loader_cpu, desc="Train", unit="batch"):
             image = batch['img'].to(device)
@@ -248,9 +260,11 @@ def train(args):
             abnorm_mask = batch['abnorm_mask'].squeeze(dim=1).to(device)
             
             # extract features
-            text_features = text_encoder(class_names, device)
+            text_features = text_encoder(class_names, device, learned=True)
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True) # NOTE: For test also 
             with torch.no_grad():
                 vision_features = vision_encoder(image)
+                vision_features = [feature / feature.norm(dim=-1, keepdim=True) for feature in vision_features] # NOTE: for test also
                 
             # calculate normal/abnormal scores
             img_scr0 = calc_score(vision_features[0], text_features[class_ids], temperature).squeeze(dim=1)
@@ -275,6 +289,10 @@ def train(args):
             elif args.cls_seg_los == 'cls':
                 loss_total = ls_cls
 
+            # L1 Regularization term NOTE: more contraint on the normal and looser constrain on the abnormal???
+            l1_norm = torch.sum(torch.abs(text_features))
+            loss_total = loss_total + l1_norm * args.l1_lambda
+
             # Train
             optimizer.zero_grad() 
             loss_total.backward() 
@@ -286,33 +304,32 @@ def train(args):
             epoch_loss['plx_ls_dc_p'] += ls_dc_p.item()
             epoch_loss['plx_ls_dc_n'] += ls_dc_n.item()
             epoch_loss['epc_ls'] += loss_total.item()
+            epoch_loss['emb_l1_nrm'] += l1_norm.item()
 
             # Update tqdm description with current loss values
-            tqdm.write(f"CE: {ls_cls.item():.4f}, FC: {ls_fc.item():.4f}, DC P: {ls_dc_p.item():.4f}, DC N: {ls_dc_n.item():.4f}")
+            tqdm.write(f"CE: {ls_cls.item():.4f}, FC: {ls_fc.item():.4f}, " + \
+                       f"DC P: {ls_dc_p.item():.4f}, DC N: {ls_dc_n.item():.4f}, " + \
+                       f"L1: {l1_norm.item():.4f}") 
 
         num_batches = len(train_loader)
-        train_stats['img_ls_ce'].append(epoch_loss['img_ls_ce'] / num_batches)
-        train_stats['pxl_ls_fc'].append(epoch_loss['pxl_ls_fc'] / num_batches)
-        train_stats['plx_ls_dc_p'].append(epoch_loss['plx_ls_dc_p'] / num_batches)
-        train_stats['plx_ls_dc_n'].append(epoch_loss['plx_ls_dc_n'] / num_batches)
-        train_stats['epc_ls'].append(epoch_loss['epc_ls'] / num_batches)
+        for key, val in epoch_loss.items():
+            train_stats[key].append(val / num_batches)
         
         # Print mean losses at the end of the epoch
-        epoch_details = f"Epoch {epoch + 1} Mean Losses: " +\
-                        f"LS CE: {epoch_loss['img_ls_ce'] / num_batches:.4f}, " +\
-                        f"LS FC: {epoch_loss['pxl_ls_fc'] / num_batches:.4f}, " +\
-                        f"LS DC P: {epoch_loss['plx_ls_dc_p'] / num_batches:.4f}, " +\
-                        f"LS DC N: {epoch_loss['plx_ls_dc_n'] / num_batches:.4f}, " +\
-                        f" Loss: {epoch_loss['epc_ls'] / num_batches:.4f}"
-        logger.info(epoch_details)
+        epoch_details = f"Epoch {epoch + 1} Mean Losses: "
+        for key, val in epoch_loss.items():
+            epoch_details = epoch_details + f"{loss_names[key]}: {train_stats[key][-1]:.4f}, " 
+        logger.info(epoch_details[:-2])
         
-        torch.save(text_encoder.learnable_parameters, f'{args.save_path}/learnable_params_{epoch+1}.pth')
+        torch.save({"learnable_prompts":text_encoder.learnable_prompts}, 
+                   f'{args.save_path}/learnable_params_{epoch+1}.pth')
+                    # "deep_parameters":text_encoder.deep_parameters}, 
         print(f'checkpoints saved for epoch {epoch+1}.')
         
     # test(text_encoder, vision_encoder, class_names, device, test_loader, class_ids, temperature, image_size, args)
         
 
-def make_human_readable_name(args, exclude=['model_name', 'dataset', 'dataset_category', 'data_path',
+def make_human_readable_name(args, exclude=['model_name', 'dataset', 'dataset_category', 'epoch', 'data_path',
                                             'checkpoint_path', 'training_path', "Timestamp",
                                             "metrics", "devices", "epochs", "visualize", 'help', None]):
     args=vars(args)
@@ -324,7 +341,7 @@ def make_human_readable_name(args, exclude=['model_name', 'dataset', 'dataset_ca
     combined = ",".join(sorted(name_value_pairs))  # Sorting ensures consistent order
     hash_value = hashlib.sha256(combined.encode()).hexdigest()
     human_hash = humanhash.humanize(hash_value, words=2)
-    return human_hash
+    return human_hash.replace('-', '_')
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -343,6 +360,8 @@ if __name__ == '__main__':
     # model
     parser.add_argument("--image_size", type=int, default=518, help="image size")
     parser.add_argument("--seed", type=int, default=111, help="random seed")
+
+    parser.add_argument("--epoch", type=int, default=5, help="epochs")
 
     parser.add_argument("--metrics", type=str, default='image-pixel-level')
     parser.add_argument("--devices", type=int, nargs='+', default=[0, 1, 2, 3, 4, 5, 6, 7], help="array of possible cuda devices")
@@ -363,12 +382,20 @@ if __name__ == '__main__':
     parser.add_argument("--image_metrics", type=str, nargs='+', default=['auroc', 'ap', 'f1-max'], help="")
     parser.add_argument("--pixel_metrics", type=str, nargs='+', default=['auroc', 'aupro', 'f1-max'], help="")
     
-    parser.add_argument("--visualize", type=str2bool, default=True)
+    parser.add_argument("--visualize", type=str2bool, default=False)
 
     ##########################
-
+    parser.add_argument("--model_version", type=str, default='l14h', choices=["s14h","b14h","l14h","so4h","g14l","g14h"])
+    parser.add_argument("--models_dir", type=str, default='/home/alireza/.cache/tips/')
+    
+    parser.add_argument("--n_deep_tokens", type=int, default=0)
+    parser.add_argument("--d_deep_tokens", type=int, default=0)
+    parser.add_argument("--n_prompt", type=int, default=8)
+    parser.add_argument("--prompt_type", type=str, default='industrial')
+    
     parser.add_argument("--prompt_learn_method", type=str, default='concat', choices=['concat', 'sumate', 'entire_learnable', 'none'])
-    parser.add_argument("--cls_seg_los", type=str, default='both', choices=['both', 'seg', 'cls'])
+    parser.add_argument("--cls_seg_los", type=str, default='seg', choices=['both', 'seg', 'cls'])
+    parser.add_argument("--l1_lambda", type=float, default=0.0)
 
     args = parser.parse_args()        
     command = [sys.executable, __file__, ] + sys.argv[1:] 

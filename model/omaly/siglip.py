@@ -17,7 +17,7 @@ class SigLIP2TextEncoderWrapper(nn.Module):
         if self.prompt_learn_method != 'none':
             self.normal_prompt = torch.nn.Parameter(torch.randn(num_tokens, text_emd_dim) * 0.02)
             self.abnormal_prompt = torch.nn.Parameter(torch.randn(num_tokens, text_emd_dim) * 0.02)
-            self.learnable_parameters = torch.nn.ParameterList([self.normal_prompt, self.abnormal_prompt])
+            self.learnable_prompts = torch.nn.ParameterList([self.normal_prompt, self.abnormal_prompt])
 
     def __call__(self, ids: torch.Tensor, paddings: torch.Tensor, learnable_prompts: torch.Tensor = None, 
                  learning_method: str = None, device='cuda'):
