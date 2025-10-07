@@ -39,6 +39,11 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+def seed_worker(worker_id):
+    worker_seed = 111 + worker_id
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
 def calc_score(vis_feat, txt_feat, temp):
     return F.softmax((vis_feat @ txt_feat.permute(0, 2, 1))/temp, dim=-1)
 
@@ -195,19 +200,19 @@ def train(args):
     logger = get_logger(args.experiment_root)
     
     # load dataset 
-    image_size = 518 # 448 #224 if is_low_res else 448
-    learning_rate = 0.001
     epochs = args.epoch
-    transform, target_transform = input_transforms.create_transforms(image_size)
+    transform, target_transform = input_transforms.create_transforms(args.image_size)
 
     # class_names = desc.dataset_dict[args.dataset]
     train_data = dataset.Dataset(args.data_path, transform, target_transform, args)    
-    test_data = dataset.Dataset([f'/data/alireza/datasets/{args.dataset_category}/visa/'], transform, target_transform, args)
+    # test_data = dataset.Dataset([f'/data/alireza/datasets/{args.dataset_category}/visa/'], transform, target_transform, args)
 
+    g = torch.Generator()
+    g.manual_seed(args.seed)
     train_loader = DataLoader(train_data, batch_size=8, shuffle=True,  
-                                num_workers=8, pin_memory=True, prefetch_factor=2)    
-    test_loader = DataLoader(test_data, batch_size=8, shuffle=False,
-                                num_workers=8, pin_memory=True, prefetch_factor=2)
+                                num_workers=8, pin_memory=True, prefetch_factor=2, generator=g, worker_init_fn=seed_worker)    
+    # test_loader = DataLoader(test_data, batch_size=8, shuffle=False,
+                                # num_workers=8, pin_memory=True, prefetch_factor=2)
 
     # class_names = [clss.replace('_', ' ') for clss in train_data.cls_names]
     # class_ids = train_data.class_ids
@@ -220,7 +225,7 @@ def train(args):
     tips_text_encoder = turn_gradient_off(tips_text_encoder)
     tips_vision_encoder = turn_gradient_off(tips_vision_encoder)
     
-    text_encoder = omaly.text_encoder(tokenizer, tips_text_encoder.to(device), 64, args.prompt_learn_method, args.prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
+    text_encoder = omaly.text_encoder(tokenizer, tips_text_encoder.to(device), 64, args.prompt_learn_method, args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
     vision_encoder = omaly.vision_encoder(tips_vision_encoder.to(device))
     
     # Define losses 
@@ -231,7 +236,7 @@ def train(args):
     # Define optimizer
     optimizer = torch.optim.Adam(
         list(text_encoder.learnable_prompts),# + list(text_encoder.deep_parameters),
-        lr=learning_rate,
+        lr=args.learning_rate,
         betas=(0.5, 0.999)
     )
     train_stats = defaultdict(list)
@@ -271,7 +276,7 @@ def train(args):
             img_scr1 = calc_score(vision_features[1], text_features[class_ids], temperature).squeeze(dim=1)
             
             img_map = calc_score(vision_features[2], text_features[class_ids], temperature)
-            anomaly_map = regrid_upsample(img_map, image_size)
+            anomaly_map = regrid_upsample(img_map, args.image_size)
             abnorm_mask[abnorm_mask > 0.5], abnorm_mask[abnorm_mask< 0.5] = 1, 0
 
             # Calculate loss
@@ -362,6 +367,7 @@ if __name__ == '__main__':
     parser.add_argument("--seed", type=int, default=111, help="random seed")
 
     parser.add_argument("--epoch", type=int, default=5, help="epochs")
+    parser.add_argument("--learning_rate", type=float, default=0.001)
 
     parser.add_argument("--metrics", type=str, default='image-pixel-level')
     parser.add_argument("--devices", type=int, nargs='+', default=[0, 1, 2, 3, 4, 5, 6, 7], help="array of possible cuda devices")
@@ -391,7 +397,7 @@ if __name__ == '__main__':
     parser.add_argument("--n_deep_tokens", type=int, default=0)
     parser.add_argument("--d_deep_tokens", type=int, default=0)
     parser.add_argument("--n_prompt", type=int, default=8)
-    parser.add_argument("--prompt_type", type=str, default='industrial')
+    parser.add_argument("--fixed_prompt_type", type=str, default='industrial')
     
     parser.add_argument("--prompt_learn_method", type=str, default='concat', choices=['concat', 'sumate', 'entire_learnable', 'none'])
     parser.add_argument("--cls_seg_los", type=str, default='seg', choices=['both', 'seg', 'cls'])
@@ -408,7 +414,7 @@ if __name__ == '__main__':
         print(args)
         setup_seed(args.seed)
         args.log_dir = make_human_readable_name(args)
-        args.data_path = [f'/data/alireza/datasets/{args.dataset_category}/{ds}/' for ds in args.dataset]
+        args.data_path = [f'/home/alireza/datasets/{args.dataset_category}/{ds}/' for ds in args.dataset]
         args.experiment_root = f'./workspaces/trained_on_{"_".join(args.dataset)}_{args.model_name}/{args.log_dir}'
         args.save_path = f'{args.experiment_root}/checkpoints'
         os.makedirs(args.save_path, exist_ok=True)
