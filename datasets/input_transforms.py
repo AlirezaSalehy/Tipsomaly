@@ -7,7 +7,7 @@ class Ensure3Channels:
     def __call__(self, img):
         return img.convert('RGB')  
 
-def create_transforms(image_size):
+def create_transforms_tips(image_size):
     transform = transforms.Compose([
         Ensure3Channels(),
         transforms.Resize((image_size, image_size)),

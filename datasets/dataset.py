@@ -82,7 +82,8 @@ class Dataset(data.Dataset):
                                                                 data['cls_name'], data['specie_name'], data['anomaly']
         
         root = data['root']    
-        img = Image.open(os.path.join(root, img_path))
+        full_img_path = os.path.join(root, img_path)
+        img = Image.open(full_img_path).convert('RGB')  
 
         if anomaly == 0 or (not os.path.isfile(os.path.join(root, mask_path))):
             img_mask = Image.fromarray(np.zeros((img.size[1], img.size[0])), mode='L')

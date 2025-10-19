@@ -5,12 +5,18 @@ from torch.nn import functional as F
 # NOTE: Since tips is inside model/, your import in model/omaly/text_encoder.py should be:
 from model.tips.text_encoder import TextEncoder as BaseTextEncoder
 from .fixed_prompts import generate_prompt_templates
+import jax.numpy as jnp
+import numpy as np
+
+def jax_to_torch(x):
+    return torch.from_numpy(np.array(x))
 
 class text_encoder(nn.Module):
-    def __init__(self, tokenizer, tips_text_encoder, MAX_LEN, prompt_learn_method='none', prompt_type='industrial', n_prompt=8, n_deep=0, d_deep=0):
+    def __init__(self, tokenizer, bb_text_encoder, bb_type, MAX_LEN, prompt_learn_method='none', prompt_type='industrial', n_prompt=8, n_deep=0, d_deep=0):
         super(text_encoder, self).__init__()  
         self.tokenizer = tokenizer
-        self.tips_encoder = tips_text_encoder
+        self._encoder = bb_text_encoder
+        self.model = bb_type
         self.MAX_LEN = MAX_LEN
         self.prompt_learn_method = prompt_learn_method
         self.n_deep_tokens = n_deep
@@ -21,7 +27,7 @@ class text_encoder(nn.Module):
         self.prompt_normal, self.prompt_abnormal, self.prompt_templates = generate_prompt_templates(self.prompt_type)
 
         self.prompt_state = [self.prompt_normal, self.prompt_abnormal]
-        text_emd_dim = tips_text_encoder.transformer.width # removing this hard code 1024
+        text_emd_dim = bb_text_encoder.transformer.width if self.model == 'tips' else bb_text_encoder.model.out_dim[1]
     
         if self.n_deep_tokens > 0 and self.d_deep_tokens > 0:
             self.deep_parameters = torch.nn.ParameterList([torch.nn.Parameter(\
@@ -60,14 +66,25 @@ class text_encoder(nn.Module):
                 for template in self.prompt_templates:
                     prompted_sentence.append(template.format(s))
             
-            # NOTE: replace the class based prompt learning concatenated to the templates with only 2 sentences
-            text_ids, text_paddings = self.tokenizer.tokenize(prompted_sentence, max_len=self.MAX_LEN)
-            class_embeddings = self.tips_encoder(text_ids.to(device), text_paddings.to(device), learnables, self.prompt_learn_method, deep_parameters, device)
+            if self.model == 'tips':
+                # NOTE: replace the class based prompt learning concatenated to the templates with only 2 sentences
+                text_ids, text_paddings = self.tokenizer.tokenize(prompted_sentence, max_len=self.MAX_LEN)
+                class_embeddings = self._encoder(text_ids.to(device), text_paddings.to(device), learnables, self.prompt_learn_method, deep_parameters, device)
 
-            # NOTE: Avoid in-place /=, +=, _add() on tensor which are actively gradiented 
-            class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True).clamp(min=1e-3)
-            class_embedding = class_embeddings.mean(dim=0)
-            class_embedding = class_embedding / class_embedding.norm(dim=-1, keepdim=True)
+                # NOTE: Avoid in-place /=, +=, _add() on tensor which are actively gradiented 
+                class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True).clamp(min=1e-3)
+                class_embedding = class_embeddings.mean(dim=0)
+                class_embedding = class_embedding / class_embedding.norm(dim=-1, keepdim=True)
+            
+            elif self.model == 'siglip2':
+                # txts = np.array([self.tokenizer({'text': text})['text'] for text in prompted_sentence])
+                txts = self.tokenizer(prompted_sentence)
+                # _, ztxt, out = self._encoder.apply({'params': params}, None, txts)
+                _, ztxt, out = self._encoder(txts)
+                class_embedding = ztxt.mean(axis=0)
+                class_embedding = class_embedding / (jnp.linalg.norm(class_embedding, axis=-1, keepdims=True) + 1e-8) 
+                class_embedding = jax_to_torch(class_embedding)
+
             text_features.append(class_embedding)
 
         text_features = torch.stack(text_features, dim=0)

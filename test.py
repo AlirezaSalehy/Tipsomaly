@@ -1,18 +1,20 @@
 import hashlib
 import humanhash
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "model"))
 
 import torch
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from torchvision import transforms
 
-import os
 import random
 import numpy as np
 import pandas as pd 
+from pathlib import Path
+
 from tabulate import tabulate
 from tqdm import tqdm
-import sys
 import subprocess
 import argparse
 from scipy.ndimage import gaussian_filter
@@ -22,6 +24,10 @@ from datasets import input_transforms, dataset, desc
 from utils.metrics import image_level_metrics, pixel_level_metrics
 from utils.visualize import visualizer
 from utils.logger import get_logger, read_train_args
+
+####################3
+
+from model.big_vision import load_siglip
 
 # def pixel_level_metrics(a,b,c):
     # return 0
@@ -34,8 +40,15 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def calc_score(vis_feat, txt_feat, temp):
+def calc_soft_score(vis_feat, txt_feat, temp):
     return F.softmax((vis_feat @ txt_feat.permute(0, 2, 1))/temp, dim=-1)
+
+def calc_sigm_score(vis_feat, txt_feat, temp, bias):
+    if vis_feat.dim() < 3:
+        vis_feat = vis_feat.unsqueeze(dim=1)
+    tempered_logits = vis_feat @ txt_feat.permute(0, 2, 1) * temp
+    probs = 1 / (1 + np.exp(-tempered_logits - bias))
+    return F.softmax(probs, dim=-1)
 
 def regrid_upsample_smooth(flat_scores, size, sigma):
     h_w = int(flat_scores.shape[1] ** 0.5) 
@@ -46,20 +59,43 @@ def regrid_upsample_smooth(flat_scores, size, sigma):
     anomaly_map = torch.stack([torch.from_numpy(gaussian_filter(map, sigma=sigma)) for map in rough_maps.detach().cpu()], dim=0)
     return anomaly_map
 
-def test(args):
-    logger = get_logger(args.save_path)
+def create_tips(args, device):
     # load dataset 
-    transform, target_transform = input_transforms.create_transforms(args.image_size)
+    transform, target_transform = input_transforms.create_transforms_tips(args.image_size)
 
     # load model
+    vision_encoder, text_encoder, tokenizer, temperature = tips.load_model.get_model(args.models_dir, args.model_version)
+    return vision_encoder.to(device), text_encoder.to(device), tokenizer, transform, target_transform, temperature
+
+# L/14, 512 
+def create_siglip2(args, device):
+    transform, target_transform = load_siglip.create_preprocessors_siglip2(args.image_size)
+    vision_encoder, text_encoder, tokenizer = load_siglip.build_siglip_modules(args.model_version, args.image_size)
+    # model.to(device)
+
+    temperature, bias = text_encoder.params['t'], text_encoder.params['b']
+    return vision_encoder, text_encoder, tokenizer, transform, target_transform, temperature, bias
+
+def test(args):
+    logger = get_logger(args.save_path)
+
     device = 'cuda'
-    tips_vision_encoder, tips_text_encoder, tokenizer, temperature = tips.load_model.get_model(args.models_dir, args.model_version)
-    text_encoder = omaly.text_encoder(tokenizer, tips_text_encoder.to(device), 64, args.prompt_learn_method, args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
-    vision_encoder = omaly.vision_encoder(tips_vision_encoder.to(device))
+    if args.backbone_name == 'tips':
+        bb_vision_encoder, bb_text_encoder, tokenizer, transform, target_transform, temperature = create_tips(args, device)
+        calc_score = lambda vis_feat, txt_feat: calc_soft_score(vis_feat, txt_feat, temperature)
+
+
+    elif args.backbone_name == 'siglip2':
+        bb_vision_encoder, bb_text_encoder, tokenizer, transform, target_transform, temperature, bias  = create_siglip2(args, device)
+        calc_score = lambda vis_feat, txt_feat: calc_sigm_score(vis_feat, txt_feat, temperature, bias)
+
+    text_encoder = omaly.text_encoder(tokenizer, bb_text_encoder, args.backbone_name, 64, args.prompt_learn_method, args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
+    vision_encoder = omaly.vision_encoder(bb_vision_encoder, args.backbone_name)
 
     # class_names = desc.dataset_dict[args.dataset]
     test_data = dataset.Dataset(args.data_path, transform, target_transform, args)
-    test_loader = DataLoader(test_data, batch_size=8, shuffle=False, num_workers=1, prefetch_factor=2, pin_memory=True)
+    test_loader = DataLoader(test_data, batch_size=8, shuffle=False)
+    # test_loader = DataLoader(test_data, batch_size=8, shuffle=False, num_workers=1, prefetch_factor=2, pin_memory=True)
     fixed_class_names = [clss.replace('_', ' ') for clss in test_data.cls_names]
     
     # extract features
@@ -107,18 +143,25 @@ def test(args):
         with torch.no_grad():
             vision_features = vision_encoder(image)
             vision_features = [feature / feature.norm(dim=-1, keepdim=True) for feature in vision_features] # NOTE: for test also
+            # print(vision_features[0].shape)
+            # print(vision_features[2].shape)
+            # print(cls_text_features[cls_class_ids].shape)
+            # print(cls_text_features.shape)
 
             # calculate normal/abnormal scores
-            img_scr0 = calc_score(vision_features[0], cls_text_features[cls_class_ids], temperature).squeeze(dim=1).detach() # prompt_class_ids cls_ids
-            img_scr1 = calc_score(vision_features[1], cls_text_features[cls_class_ids], temperature).squeeze(dim=1).detach()
-            
-            img_map = calc_score(vision_features[2], seg_text_features[seg_class_ids], temperature)
+            img_scr0 = calc_score(vision_features[0], cls_text_features[cls_class_ids]).squeeze(dim=1).detach() # prompt_class_ids cls_ids
+            img_scr1 = calc_score(vision_features[1], cls_text_features[cls_class_ids]).squeeze(dim=1).detach()
+            # print(img_scr0.shape)
+            # print(img_scr1.shape)
+
+            img_map = calc_score(vision_features[2], seg_text_features[seg_class_ids])
             if args.aggregate_local2global:
                 max_local = torch.max(img_map, dim=1)[0]
                 img_scr0 = img_scr0 + max_local
                 img_scr1 = img_scr1 + max_local
                 
             pxl_scr = regrid_upsample_smooth(img_map.detach(), args.image_size, args.sigma)
+            # print(pxl_scr.shape)
             
         for idx, cls_id in enumerate(batch['cls_id'].cpu().numpy()):
             dataset_preds[cls_id]['img_scrs'].append([img_scr0[idx][1].cpu(), img_scr1[idx][1].cpu()])
@@ -136,7 +179,9 @@ def test(args):
         img_lbls = np.array(dataset_preds[cls_id]['img_lbls'])
         pxl_prds = torch.stack(dataset_preds[cls_id]['pxl_scrs'], dim=0)
         pxl_lbls = torch.stack(dataset_preds[cls_id]['pxl_lbls'], dim=0)
-    
+        print(f'pxl_prds: ({pxl_prds.max()}, {pxl_prds.min()})')
+        print(f'pxl_lbls: ({img_prds.max()}, {img_prds.min()})')
+
         for px_mtr in args.pixel_metrics:
             if not px_mtr == '':
                 cls_results.append(pixel_level_metrics(pxl_prds, pxl_lbls, px_mtr)*100)
@@ -144,11 +189,11 @@ def test(args):
         for im_mtr in args.image_metrics:
             for col in range(img_prds.shape[1]):
                 cls_results.append(image_level_metrics(img_prds[:, col], img_lbls, im_mtr)*100)
-                
+        
         if args.visualize:
             img_path = f"{args.dataset}/{dataset_preds[cls_id]['name']}"
             visualizer(dataset_preds[cls_id]['paths'], pxl_prds.cpu().numpy(), pxl_lbls.cpu().numpy(), args.image_size, img_path, save_path=f'{args.save_path}/img/', draw_contours=True)
-            
+        
         dataset_results.append(cls_results)
         
     df = pd.DataFrame(dataset_results, columns=header)
@@ -186,6 +231,7 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 if __name__ == '__main__':
+    ROOT_DIR='/kaggle/input'
     parser = argparse.ArgumentParser("TIPSomaly", add_help=True)
     # model
     parser.add_argument("--image_size", type=int, default=518, help="image size") #224 if is_low_res else 448
@@ -214,8 +260,10 @@ if __name__ == '__main__':
     parser.add_argument("--log_dir", type=str, default="")
     
     ##########################
-    parser.add_argument("--model_version", type=str, default='l14h', choices=["s14h","b14h","l14h","so4h","g14l","g14h"])
-    parser.add_argument("--models_dir", type=str, default='/home/alireza/.cache/tips/')
+    parser.add_argument("--backbone_name", type=str, default='tips', choices=["tips", "siglip2"])
+    parser.add_argument("--model_version", type=str, default='l14h', choices=["s14h","b14h","l14h","so4h","g14l","g14h", \
+                                                                                "B/16", "L/16", "So400m/14", "So400m/16", "g-opt/16"])
+    parser.add_argument("--models_dir", type=str, default='{ROOT_DIR}/.cache/tips/')
     
     parser.add_argument("--n_deep_tokens", type=int, default=0)
     parser.add_argument("--d_deep_tokens", type=int, default=0)
@@ -236,7 +284,12 @@ if __name__ == '__main__':
     else:
         setup_seed(args.seed)
 
-        args.data_path = [f'/home/alireza/datasets/{args.dataset_category}/{args.dataset}/']
+        #### ONLY KAGGLE
+        args.dataset = f'{args.dataset}-ad'
+        base_paths = [Path(p) for p in [f'{ROOT_DIR}/{args.dataset_category}/{args.dataset}/']]
+        args.data_path = [str(next(p.iterdir())) for p in base_paths]
+        
+        # args.data_path = [f'{ROOT_DIR}/datasets/{args.dataset_category}/{args.dataset}/']
         if not args.checkpoint_path:
             args.log_dir = make_human_readable_name(args)
             args.save_path = f'./workspaces/{args.model_name}/{args.log_dir}/quantative/NoTrain/{args.dataset}'

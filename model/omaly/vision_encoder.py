@@ -1,14 +1,21 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import jax.numpy as jnp
+import numpy as np
 
+def jax_to_torch(x):
+    return torch.from_numpy(np.array(x))
+    
+# The backbone can be SigLIP2 or TIPS
 class vision_encoder(nn.Module):
-    def __init__(self, tips_vision_encoder):
+    def __init__(self, bb_vision_encoder, bb_type):
         super(vision_encoder, self).__init__()
-        self.tips_encoder = tips_vision_encoder
+        self._encoder = bb_vision_encoder
+        self.model = bb_type
 
-    def forward(self, images):
-        outputs = self.tips_encoder(images)
+    def _forward_tips(_encoder, images):
+        outputs = _encoder(images)
         
         first_cls_token = outputs[0]
         first_cls_token = first_cls_token / first_cls_token.norm(dim=-1, keepdim=True).clamp(min=1e-3)
@@ -21,5 +28,15 @@ class vision_encoder(nn.Module):
         
         return first_cls_token, second_cls_token, spatial_tokens
     
+    def _forward_siglip2(_encoder, images):
+        _, _, out = _encoder(images)
+        return jax_to_torch(out['img/normalized']), jax_to_torch(out['img/normalized']), jax_to_torch(out['img/2d_normalized'])
+    
+    def forward(self, images):
+        if self.model == 'siglip2':
+            return vision_encoder._forward_siglip2(self._encoder, images)
+        elif self.model == 'tips':
+            return vision_encoder._forward_tips(self._encoder, images)
+         
     # outputs /= outputs.norm(dim=-1, keepdim=True).clamp(min=1e-3)
     # first_cls_token, second_cls_token, spatial_tokens = outputs[:, 0], outputs[:, 1], outputs[:, 2:]
