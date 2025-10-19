@@ -180,7 +180,7 @@ def test(args):
         pxl_prds = torch.stack(dataset_preds[cls_id]['pxl_scrs'], dim=0)
         pxl_lbls = torch.stack(dataset_preds[cls_id]['pxl_lbls'], dim=0)
         print(f'pxl_prds: ({pxl_prds.max()}, {pxl_prds.min()})')
-        print(f'pxl_lbls: ({img_prds.max()}, {img_prds.min()})')
+        print(f'img_prds: ({img_prds.max()}, {img_prds.min()})')
 
         for px_mtr in args.pixel_metrics:
             if not px_mtr == '':
@@ -253,7 +253,7 @@ if __name__ == '__main__':
     parser.add_argument("--image_metrics", type=str, nargs='+', default=['auroc', 'ap', 'f1-max'], help="")
     parser.add_argument("--pixel_metrics", type=str, nargs='+', default=['auroc', 'aupro', 'f1-max'], help="")
 
-    parser.add_argument("--k_shot", type=int, default=0, help="number of samples per class for few-shot learning. 0 means use all data.")
+    parser.add_argument("--k_shot", type=int, default=16, help="number of samples per class for few-shot learning. 0 means use all data.")
     
     parser.add_argument("--type", type=str, default='train') 
     parser.add_argument("--visualize", type=str2bool, default=False)

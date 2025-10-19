@@ -202,8 +202,10 @@ def generate_prompt_templates(prompt_type):
     
     elif prompt_type == 'object_agnostic':
         prompt_normal = ['{}']
+        # prompt_normal = ['normal {}']
         prompt_abnormal = ['damaged {}']
         prompt_templates = ['{}']
+        # prompt_templates = ['a photo of a {}']
         
     elif prompt_type == 'industrial':
         prompt_normal = ['{}', 'flawless {}', 'perfect {}', 'unblemished {}', '{} without flaw',
