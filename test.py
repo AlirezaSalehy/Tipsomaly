@@ -74,6 +74,7 @@ def create_siglip2(args, device):
     # model.to(device)
 
     temperature, bias = text_encoder.params['t'], text_encoder.params['b']
+    temperature = np.exp(torch.from_numpy(np.array(temperature)))
     return vision_encoder, text_encoder, tokenizer, transform, target_transform, temperature, bias
 
 def test(args):
