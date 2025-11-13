@@ -7,6 +7,8 @@ from model.tips.text_encoder import TextEncoder as BaseTextEncoder
 from .fixed_prompts import generate_prompt_templates
 import jax.numpy as jnp
 import numpy as np
+from tqdm import tqdm
+import math
 
 def jax_to_torch(x):
     return torch.from_numpy(np.array(x))
@@ -77,13 +79,47 @@ class text_encoder(nn.Module):
                 class_embedding = class_embedding / class_embedding.norm(dim=-1, keepdim=True)
             
             elif self.model == 'siglip2':
-                # txts = np.array([self.tokenizer({'text': text})['text'] for text in prompted_sentence])
-                txts = self.tokenizer(prompted_sentence)
-                # _, ztxt, out = self._encoder.apply({'params': params}, None, txts)
-                _, ztxt, out = self._encoder(txts)
-                class_embedding = ztxt.mean(axis=0)
-                class_embedding = class_embedding / (jnp.linalg.norm(class_embedding, axis=-1, keepdims=True) + 1e-8) 
-                class_embedding = jax_to_torch(class_embedding)
+                # We'll accumulate sums in JAX so final mean+normalize happens exactly like original.
+                num_prompts = len(prompted_sentence)
+                if num_prompts == 0:
+                    class_embedding = torch.zeros(getattr(self, "expected_text_dim", 512), device=device)
+                    text_features.append(class_embedding)
+                    continue
+
+                batch_size = 20
+                batch_ranges = range(0, num_prompts, batch_size)
+                total_batches = math.ceil(num_prompts / batch_size)
+
+                # accumulator for sum in JAX (None -> initialize on first batch)
+                sum_jax = None
+
+                # optional tqdm over batches
+                batch_iter = tqdm(batch_ranges, total=total_batches,
+                                desc=f"Encoding text {i+1}/{len(self.prompt_state)} ({self.model})",
+                                leave=False)
+
+                for start in batch_iter:
+                    batch_sentences = prompted_sentence[start:start + batch_size]
+                    # tokenizer expects a list of strings (batch)
+                    txts = self.tokenizer(batch_sentences)
+
+                    # encoder returns jax arrays; ztxt shape -> (batch, dim)
+                    _, ztxt, out = self._encoder(txts)
+
+                    # sum along batch axis in JAX to accumulate raw (unnormalized) vectors
+                    batch_sum = jnp.sum(ztxt, axis=0)  # shape (dim,)
+
+                    if sum_jax is None:
+                        sum_jax = batch_sum
+                    else:
+                        sum_jax = sum_jax + batch_sum
+
+                # now compute mean in JAX (exactly as original did: mean then normalize)
+                mean_jax = sum_jax / float(num_prompts)
+                mean_jax = mean_jax / (jnp.linalg.norm(mean_jax, axis=-1, keepdims=True) + 1e-8)
+
+                # convert final normalized mean to torch once
+                class_embedding = jax_to_torch(mean_jax)  # shape: (dim,)
 
             text_features.append(class_embedding)
 
