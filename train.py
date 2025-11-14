@@ -1,18 +1,17 @@
 import hashlib
 import humanhash
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "model"))
 
 import torch
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from torchvision import transforms
-
-import os
 import random
 import numpy as np
 import pandas as pd 
 from tabulate import tabulate
 from tqdm import tqdm
-import sys
 import subprocess
 import argparse
 from scipy.ndimage import gaussian_filter
@@ -233,12 +232,15 @@ def train(args):
         bb_vision_encoder, bb_text_encoder, tokenizer, transform, target_transform, temperature, bias  = create_siglip2(args, device)
         calc_score = lambda vis_feat, txt_feat: calc_sigm_score(vis_feat, txt_feat, temperature, bias)
 
+    bb_text_encoder = bb_text_encoder.to(device)
+    bb_vision_encoder = bb_vision_encoder.to(device)
+    bb_text_encoder = turn_gradient_off(bb_text_encoder)
+    bb_vision_encoder = turn_gradient_off(bb_vision_encoder)
     text_encoder = omaly.text_encoder(tokenizer, bb_text_encoder, args.backbone_name, 64, args.prompt_learn_method, args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
     vision_encoder = omaly.vision_encoder(bb_vision_encoder, args.backbone_name)
 
     # load dataset 
     epochs = args.epoch
-    transform, target_transform = input_transforms.create_transforms(args.image_size)
 
     # class_names = desc.dataset_dict[args.dataset]
     train_data = dataset.Dataset(args.data_path, transform, target_transform, args)    
@@ -255,14 +257,6 @@ def train(args):
     # class_ids = train_data.class_ids
     class_names = ['object']
     class_ids = torch.tensor([0])
-    
-    # load model
-    tips_vision_encoder, tips_text_encoder, tokenizer, temperature = tips.load_model.get_model(args.models_dir, args.model_version)
-    tips_text_encoder = turn_gradient_off(tips_text_encoder)
-    tips_vision_encoder = turn_gradient_off(tips_vision_encoder)
-    
-    text_encoder = omaly.text_encoder(tokenizer, tips_text_encoder.to(device), 64, args.prompt_learn_method, args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
-    vision_encoder = omaly.vision_encoder(tips_vision_encoder.to(device))
     
     # Define losses 
     bce_loss = torch.nn.CrossEntropyLoss()
@@ -427,7 +421,8 @@ if __name__ == '__main__':
     parser.add_argument("--visualize", type=str2bool, default=False)
 
     ##########################
-    parser.add_argument("--model_version", type=str, default='l14h', choices=["s14h","b14h","l14h","so4h","g14l","g14h"])
+    parser.add_argument("--model_version", type=str, default='l14h', choices=["s14h","b14h","l14h","so4h","g14l","g14h", \
+                                                                                "B/16", "L/16", "So400m/14", "So400m/16", "g-opt/16"])
     parser.add_argument("--models_dir", type=str, default='/home/alireza/.cache/tips/')
     
     parser.add_argument("--n_deep_tokens", type=int, default=0)

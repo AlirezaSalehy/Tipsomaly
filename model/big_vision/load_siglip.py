@@ -146,8 +146,8 @@ class SigLIPTextEncoder:
         self.model = model
         self.params = params
 
-    def __call__(self, text_ids):
-        return self.model.apply({'params': self.params}, None, text_ids)
+    def __call__(self, text_ids, learnable_prompts=None, learning_method=None):
+        return self.model.apply({'params': self.params}, None, text_ids, learnable_prompts=learnable_prompts, learning_method=learning_method)
 
 def build_siglip_modules(model_version, image_size, SEQLEN=64):
     model, params = load(model_version, image_size)
