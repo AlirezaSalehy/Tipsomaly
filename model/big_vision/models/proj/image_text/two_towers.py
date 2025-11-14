@@ -36,7 +36,7 @@ class Model(nn.Module):
   bias_init: Optional[float] = None
 
   @nn.compact
-  def __call__(self, image, text=None, **kw):
+  def __call__(self, image, text=None, learnable_prompts=None, learning_method=None, **kw):
     """Returns (B,C) image and (B,C) text representations."""
 
     # Support calling without text or without image, for example for few-shot.
@@ -52,7 +52,7 @@ class Model(nn.Module):
           f"big_vision.models.{self.text_model}"
       ).Model(**{"num_classes": out_dims[1], **(self.text or {})}, name="txt")
 
-      ztxt, out_txt = text_model(text, **kw)
+      ztxt, out_txt = text_model(text, learnable_prompts=learnable_prompts, learning_method=learning_method, **kw)
       for k, v in out_txt.items():
         out[f"txt/{k}"] = v
 

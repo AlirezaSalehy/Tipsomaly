@@ -26,6 +26,7 @@ from utils.visualize import visualizer
 from utils.logger import save_args_to_file, get_logger
 
 from collections import defaultdict
+from model.big_vision import load_siglip
 
 loss_names = {'img_ls_ce': 'LS CE', 'pxl_ls_fc': 'LS FC', \
                 'plx_ls_dc_p': 'LS DC P', 'plx_ls_dc_n': 'LS DC N', \
@@ -44,8 +45,33 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def calc_score(vis_feat, txt_feat, temp):
+def calc_soft_score(vis_feat, txt_feat, temp):
     return F.softmax((vis_feat @ txt_feat.permute(0, 2, 1))/temp, dim=-1)
+
+def calc_sigm_score(vis_feat, txt_feat, temp, bias):
+    if vis_feat.dim() < 3:
+        vis_feat = vis_feat.unsqueeze(dim=1)
+    tempered_logits = vis_feat @ txt_feat.permute(0, 2, 1) * temp
+    probs = 1 / (1 + np.exp(-tempered_logits - bias))
+    return F.softmax(probs, dim=-1)
+
+def create_tips(args, device):
+    # load dataset 
+    transform, target_transform = input_transforms.create_transforms_tips(args.image_size)
+
+    # load model
+    vision_encoder, text_encoder, tokenizer, temperature = tips.load_model.get_model(args.models_dir, args.model_version)
+    return vision_encoder.to(device), text_encoder.to(device), tokenizer, transform, target_transform, temperature
+
+def create_siglip2(args, device):
+    transform, target_transform = load_siglip.create_preprocessors_siglip2(args.image_size)
+    vision_encoder, text_encoder, tokenizer = load_siglip.build_siglip_modules(args.model_version, args.image_size)
+    # model.to(device)
+
+    temperature, bias = text_encoder.params['t'], text_encoder.params['b']
+    temperature = np.exp(torch.from_numpy(np.array(temperature)))
+    return vision_encoder, text_encoder, tokenizer, transform, target_transform, temperature, bias
+
 
 def regrid_upsample_smooth(flat_scores, size, sigma):
     upsampled = regrid_upsample(flat_scores, size)
@@ -199,6 +225,17 @@ def test(text_encoder, vision_encoder, prompt_class_names, device, test_loader, 
 def train(args):
     logger = get_logger(args.experiment_root)
     
+    device = 'cuda'
+    if args.backbone_name == 'tips':
+        bb_vision_encoder, bb_text_encoder, tokenizer, transform, target_transform, temperature = create_tips(args, device)
+        calc_score = lambda vis_feat, txt_feat: calc_soft_score(vis_feat, txt_feat, temperature)
+    elif args.backbone_name == "siglip2":
+        bb_vision_encoder, bb_text_encoder, tokenizer, transform, target_transform, temperature, bias  = create_siglip2(args, device)
+        calc_score = lambda vis_feat, txt_feat: calc_sigm_score(vis_feat, txt_feat, temperature, bias)
+
+    text_encoder = omaly.text_encoder(tokenizer, bb_text_encoder, args.backbone_name, 64, args.prompt_learn_method, args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
+    vision_encoder = omaly.vision_encoder(bb_vision_encoder, args.backbone_name)
+
     # load dataset 
     epochs = args.epoch
     transform, target_transform = input_transforms.create_transforms(args.image_size)
@@ -220,7 +257,6 @@ def train(args):
     class_ids = torch.tensor([0])
     
     # load model
-    device = 'cuda'
     tips_vision_encoder, tips_text_encoder, tokenizer, temperature = tips.load_model.get_model(args.models_dir, args.model_version)
     tips_text_encoder = turn_gradient_off(tips_text_encoder)
     tips_vision_encoder = turn_gradient_off(tips_vision_encoder)
@@ -402,6 +438,7 @@ if __name__ == '__main__':
     parser.add_argument("--prompt_learn_method", type=str, default='concat', choices=['concat', 'sumate', 'entire_learnable', 'none'])
     parser.add_argument("--cls_seg_los", type=str, default='seg', choices=['both', 'seg', 'cls'])
     parser.add_argument("--l1_lambda", type=float, default=0.0)
+    parser.add_argument("--backbone_name", type=str, default='tips', choices=["tips", "siglip2"])
 
     args = parser.parse_args()        
     command = [sys.executable, __file__, ] + sys.argv[1:] 
