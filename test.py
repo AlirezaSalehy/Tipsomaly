@@ -24,6 +24,7 @@ from datasets import input_transforms, dataset, desc
 from utils.metrics import image_level_metrics, pixel_level_metrics
 from utils.visualize import visualizer
 from utils.logger import get_logger, read_train_args
+from transformers import AutoProcessor, AutoModel, AutoTokenizer, SiglipTextModel, SiglipVisionModel
 
 ####################3
 
@@ -50,6 +51,20 @@ def calc_sigm_score(vis_feat, txt_feat, temp, bias):
     probs = 1 / (1 + np.exp(-tempered_logits - bias))
     return F.softmax(probs, dim=-1)
 
+# def calc_sigm_score_hf(vis_feat, txt_feat, temp, bias):
+#     logits_per_text = torch.matmul(txt_feat, vis_feat.t())
+#     logits_per_text = logits_per_text * temp + bias
+#     logits_per_image = logits_per_text.t()
+#     probs = torch.sigmoid(logits_per_image)
+#     return F.softmax(probs, dim=-1)
+
+def calc_sigm_score_hf(vis_feat, txt_feat, temp, bias):
+    if vis_feat.dim() < 3:
+        vis_feat = vis_feat.unsqueeze(dim=1)
+    logits = vis_feat @ txt_feat.permute(0, 2, 1) * temp + bias
+    probs = torch.sigmoid(logits)
+    return probs
+    
 def regrid_upsample_smooth(flat_scores, size, sigma):
     h_w = int(flat_scores.shape[1] ** 0.5) 
     regrided = flat_scores.reshape(flat_scores.shape[0], h_w, h_w, -1).permute(0, 3, 1, 2)
@@ -65,7 +80,7 @@ def create_tips(args, device):
 
     # load model
     vision_encoder, text_encoder, tokenizer, temperature = tips.load_model.get_model(args.models_dir, args.model_version)
-    return vision_encoder.to(device), text_encoder.to(device), tokenizer, transform, target_transform, temperature
+    return vision_encoder.to(device), text_encoder.to(device), text_encoder.transformer.width, tokenizer, transform, target_transform, temperature
 
 # L/14, 512 
 def create_siglip2(args, device):
@@ -75,22 +90,44 @@ def create_siglip2(args, device):
 
     temperature, bias = text_encoder.params['t'], text_encoder.params['b']
     temperature = np.exp(torch.from_numpy(np.array(temperature)))
-    return vision_encoder, text_encoder, tokenizer, transform, target_transform, temperature, bias
+    return vision_encoder, text_encoder, text_encoder.model.out_dim[1], tokenizer, transform, target_transform, temperature, bias
+
+def create_siglip2_hf(args, device):
+    tokenizer = AutoTokenizer.from_pretrained(args.model_version)
+    model = AutoModel.from_pretrained(args.model_version)
+    text_encoder = SiglipTextModel.from_pretrained(args.model_version).to(device)
+    vision_encoder = SiglipVisionModel.from_pretrained(args.model_version).to(device)
+    processor = AutoProcessor.from_pretrained(args.model_version)
+    def transform(x):
+        d = processor(images=x, return_tensors="pt")
+        d['pixel_values'] = d['pixel_values'].squeeze(0)   # in-place replace
+        return d
+    # transform = lambda x: processor(images=x, return_tensors="pt")['pixel_values'].squeeze(1) # removing the extra dimension
+    target_transform = transforms.Compose([
+        transforms.Resize((args.image_size, args.image_size)),
+        transforms.ToTensor(),
+    ])
+    bias = model.logit_bias.to(device)
+    temperature = model.logit_scale.to(device).exp()
+    return vision_encoder, text_encoder, model.text_model.embeddings.token_embedding.embedding_dim, tokenizer, transform, target_transform, temperature, bias
 
 def test(args):
     logger = get_logger(args.save_path)
 
     device = 'cuda'
     if args.backbone_name == 'tips':
-        bb_vision_encoder, bb_text_encoder, tokenizer, transform, target_transform, temperature = create_tips(args, device)
+        bb_vision_encoder, bb_text_encoder, text_embd_dim, tokenizer, transform, target_transform, temperature = create_tips(args, device)
         calc_score = lambda vis_feat, txt_feat: calc_soft_score(vis_feat, txt_feat, temperature)
 
-
     elif args.backbone_name == 'siglip2':
-        bb_vision_encoder, bb_text_encoder, tokenizer, transform, target_transform, temperature, bias  = create_siglip2(args, device)
+        bb_vision_encoder, bb_text_encoder, text_embd_dim, tokenizer, transform, target_transform, temperature, bias  = create_siglip2(args, device)
         calc_score = lambda vis_feat, txt_feat: calc_sigm_score(vis_feat, txt_feat, temperature, bias)
 
-    text_encoder = omaly.text_encoder(tokenizer, bb_text_encoder, args.backbone_name, 64, args.prompt_learn_method, args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
+    elif args.backbone_name == 'siglip2-hf':
+        bb_vision_encoder, bb_text_encoder, text_embd_dim, tokenizer, transform, target_transform, temperature, bias = create_siglip2_hf(args, device)
+        calc_score = lambda vis_feat, txt_feat: calc_sigm_score_hf(vis_feat, txt_feat, temperature, bias)
+
+    text_encoder = omaly.text_encoder(tokenizer, bb_text_encoder, args.backbone_name, text_embd_dim, 64, 'none', args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
     vision_encoder = omaly.vision_encoder(bb_vision_encoder, args.backbone_name)
 
     # class_names = desc.dataset_dict[args.dataset]
@@ -261,9 +298,10 @@ if __name__ == '__main__':
     parser.add_argument("--log_dir", type=str, default="")
     
     ##########################
-    parser.add_argument("--backbone_name", type=str, default='tips', choices=["tips", "siglip2"])
+    parser.add_argument("--backbone_name", type=str, default='tips', choices=["tips", "siglip2", "siglip2-hf"])
     parser.add_argument("--model_version", type=str, default='l14h', choices=["s14h","b14h","l14h","so4h","g14l","g14h", \
-                                                                                "B/16", "L/16", "So400m/14", "So400m/16", "g-opt/16"])
+                                                                                "B/16", "L/16", "So400m/14", "So400m/16", "g-opt/16", \
+                                                                                "google/siglip2-so400m-patch16-256", "google/siglip2-large-patch16-512"])
     parser.add_argument("--models_dir", type=str, default='{ROOT_DIR}/.cache/tips/')
     
     parser.add_argument("--n_deep_tokens", type=int, default=0)
@@ -288,7 +326,7 @@ if __name__ == '__main__':
         #### ONLY KAGGLE
         args.dataset = f'{args.dataset}-ad'
         base_paths = [Path(p) for p in [f'{ROOT_DIR}/{args.dataset_category}/{args.dataset}/']]
-        args.data_path = [str(next(p.iterdir())) for p in base_paths]
+        args.data_path = ['/kaggle/input/mvtec-ad/mvtec_anomaly_detection']
         
         # args.data_path = [f'{ROOT_DIR}/datasets/{args.dataset_category}/{args.dataset}/']
         if not args.checkpoint_path:
