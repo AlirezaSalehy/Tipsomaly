@@ -141,7 +141,7 @@ class text_encoder(nn.Module):
                 for start in batch_iter:
                     batch_sentences = prompted_sentence[start:start + batch_size]
                     ids = self.tokenizer(text=batch_sentences, padding="max_length", max_length=self.MAX_LEN, return_tensors="pt")
-                    ztxt = self._encoder(ids['input_ids'].to(device)).pooler_output
+                    ztxt = self._encoder(ids['input_ids'].to(device), learnable_prompts=learnables, learning_method=self.prompt_learn_method).pooler_output
                     batch_sum = torch.sum(ztxt, dim=0)  # shape (dim,)
 
                     if sum_torch is None:

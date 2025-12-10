@@ -26,6 +26,8 @@ from utils.logger import save_args_to_file, get_logger
 
 from collections import defaultdict
 from model.big_vision import load_siglip
+from transformers import AutoProcessor, AutoModel, AutoTokenizer, SiglipTextModel, SiglipVisionModel
+from model.siglip2.siglip2_prompt_learnable import SiglipTextModelWithPromptLearning
 
 loss_names = {'img_ls_ce': 'LS CE', 'pxl_ls_fc': 'LS FC', \
                 'plx_ls_dc_p': 'LS DC P', 'plx_ls_dc_n': 'LS DC N', \
@@ -54,13 +56,20 @@ def calc_sigm_score(vis_feat, txt_feat, temp, bias):
     probs = 1 / (1 + np.exp(-tempered_logits - bias))
     return F.softmax(probs, dim=-1)
 
+def calc_sigm_score_hf(vis_feat, txt_feat, temp, bias):
+    if vis_feat.dim() < 3:
+        vis_feat = vis_feat.unsqueeze(dim=1)
+    logits = vis_feat @ txt_feat.permute(0, 2, 1) * temp + bias
+    probs = torch.sigmoid(logits)
+    return probs
+
 def create_tips(args, device):
     # load dataset 
     transform, target_transform = input_transforms.create_transforms_tips(args.image_size)
 
     # load model
     vision_encoder, text_encoder, tokenizer, temperature = tips.load_model.get_model(args.models_dir, args.model_version)
-    return vision_encoder.to(device), text_encoder.to(device), tokenizer, transform, target_transform, temperature
+    return vision_encoder.to(device), text_encoder.to(device), text_encoder.transformer.width, tokenizer, transform, target_transform, temperature
 
 def create_siglip2(args, device):
     transform, target_transform = load_siglip.create_preprocessors_siglip2(args.image_size)
@@ -69,8 +78,26 @@ def create_siglip2(args, device):
 
     temperature, bias = text_encoder.params['t'], text_encoder.params['b']
     temperature = np.exp(torch.from_numpy(np.array(temperature)))
-    return vision_encoder, text_encoder, tokenizer, transform, target_transform, temperature, bias
+    return vision_encoder, text_encoder, text_encoder.model.out_dim[1], tokenizer, transform, target_transform, temperature, bias
 
+def create_siglip2_hf(args, device):
+    tokenizer = AutoTokenizer.from_pretrained(args.model_version)
+    model = AutoModel.from_pretrained(args.model_version)
+    text_encoder = SiglipTextModelWithPromptLearning.from_pretrained(args.model_version).to(device)
+    vision_encoder = SiglipVisionModel.from_pretrained(args.model_version).to(device)
+    processor = AutoProcessor.from_pretrained(args.model_version)
+    def transform(x):
+        d = processor(images=x, return_tensors="pt")
+        d['pixel_values'] = d['pixel_values'].squeeze(0)   # in-place replace
+        return d
+    # transform = lambda x: processor(images=x, return_tensors="pt")['pixel_values'].squeeze(1) # removing the extra dimension
+    target_transform = transforms.Compose([
+        transforms.Resize((args.image_size, args.image_size)),
+        transforms.ToTensor(),
+    ])
+    bias = model.logit_bias.to(device)
+    temperature = model.logit_scale.to(device).exp()
+    return vision_encoder, text_encoder, model.text_model.embeddings.token_embedding.embedding_dim, tokenizer, transform, target_transform, temperature, bias
 
 def regrid_upsample_smooth(flat_scores, size, sigma):
     upsampled = regrid_upsample(flat_scores, size)
@@ -226,17 +253,20 @@ def train(args):
     
     device = 'cuda'
     if args.backbone_name == 'tips':
-        bb_vision_encoder, bb_text_encoder, tokenizer, transform, target_transform, temperature = create_tips(args, device)
+        bb_vision_encoder, bb_text_encoder, text_embd_dim, tokenizer, transform, target_transform, temperature = create_tips(args, device)
         calc_score = lambda vis_feat, txt_feat: calc_soft_score(vis_feat, txt_feat, temperature)
     elif args.backbone_name == "siglip2":
-        bb_vision_encoder, bb_text_encoder, tokenizer, transform, target_transform, temperature, bias  = create_siglip2(args, device)
+        bb_vision_encoder, bb_text_encoder, text_embd_dim, tokenizer, transform, target_transform, temperature, bias  = create_siglip2(args, device)
         calc_score = lambda vis_feat, txt_feat: calc_sigm_score(vis_feat, txt_feat, temperature, bias)
+    elif args.backbone_name == 'siglip2-hf':
+        bb_vision_encoder, bb_text_encoder, text_embd_dim, tokenizer, transform, target_transform, temperature, bias = create_siglip2_hf(args, device)
+        calc_score = lambda vis_feat, txt_feat: calc_sigm_score_hf(vis_feat, txt_feat, temperature, bias)
 
     bb_text_encoder = bb_text_encoder.to(device)
     bb_vision_encoder = bb_vision_encoder.to(device)
     bb_text_encoder = turn_gradient_off(bb_text_encoder)
     bb_vision_encoder = turn_gradient_off(bb_vision_encoder)
-    text_encoder = omaly.text_encoder(tokenizer, bb_text_encoder, args.backbone_name, 64, args.prompt_learn_method, args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
+    text_encoder = omaly.text_encoder(tokenizer, bb_text_encoder, args.backbone_name, text_embd_dim, 64, args.prompt_learn_method, args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
     vision_encoder = omaly.vision_encoder(bb_vision_encoder, args.backbone_name)
 
     # load dataset 
@@ -302,10 +332,10 @@ def train(args):
                 vision_features = [feature / feature.norm(dim=-1, keepdim=True) for feature in vision_features] # NOTE: for test also
                 
             # calculate normal/abnormal scores
-            img_scr0 = calc_score(vision_features[0], text_features[class_ids], temperature).squeeze(dim=1)
-            img_scr1 = calc_score(vision_features[1], text_features[class_ids], temperature).squeeze(dim=1)
+            img_scr0 = calc_score(vision_features[0], text_features[class_ids]).squeeze(dim=1)
+            img_scr1 = calc_score(vision_features[1], text_features[class_ids]).squeeze(dim=1)
             
-            img_map = calc_score(vision_features[2], text_features[class_ids], temperature)
+            img_map = calc_score(vision_features[2], text_features[class_ids])
             anomaly_map = regrid_upsample(img_map, args.image_size)
             abnorm_mask[abnorm_mask > 0.5], abnorm_mask[abnorm_mask< 0.5] = 1, 0
 
@@ -422,7 +452,8 @@ if __name__ == '__main__':
 
     ##########################
     parser.add_argument("--model_version", type=str, default='l14h', choices=["s14h","b14h","l14h","so4h","g14l","g14h", \
-                                                                                "B/16", "L/16", "So400m/14", "So400m/16", "g-opt/16"])
+                                                                                "B/16", "L/16", "So400m/14", "So400m/16", "g-opt/16", \
+                                                                                    "google/siglip2-so400m-patch16-256", "google/siglip2-large-patch16-512"])
     parser.add_argument("--models_dir", type=str, default='/home/alireza/.cache/tips/')
     
     parser.add_argument("--n_deep_tokens", type=int, default=0)
@@ -433,7 +464,7 @@ if __name__ == '__main__':
     parser.add_argument("--prompt_learn_method", type=str, default='concat', choices=['concat', 'sumate', 'entire_learnable', 'none'])
     parser.add_argument("--cls_seg_los", type=str, default='seg', choices=['both', 'seg', 'cls'])
     parser.add_argument("--l1_lambda", type=float, default=0.0)
-    parser.add_argument("--backbone_name", type=str, default='tips', choices=["tips", "siglip2"])
+    parser.add_argument("--backbone_name", type=str, default='tips', choices=["tips", "siglip2", "siglip2-hf"])
 
     args = parser.parse_args()        
     command = [sys.executable, __file__, ] + sys.argv[1:] 
@@ -446,7 +477,7 @@ if __name__ == '__main__':
         print(args)
         setup_seed(args.seed)
         args.log_dir = make_human_readable_name(args)
-        args.data_path = [f'/home/alireza/datasets/{args.dataset_category}/{ds}/' for ds in args.dataset]
+        args.data_path = ['/kaggle/input/mvtec-ad/mvtec_anomaly_detection']
         args.experiment_root = f'./workspaces/trained_on_{"_".join(args.dataset)}_{args.model_name}/{args.log_dir}'
         args.save_path = f'{args.experiment_root}/checkpoints'
         os.makedirs(args.save_path, exist_ok=True)
