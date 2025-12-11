@@ -56,10 +56,10 @@ def calc_sigm_score(vis_feat, txt_feat, temp, bias):
     probs = 1 / (1 + np.exp(-tempered_logits - bias))
     return F.softmax(probs, dim=-1)
 
-def calc_sigm_score_hf(vis_feat, txt_feat, temp, bias):
+def calc_sigm_score_hf(vis_feat, txt_feat, temp_non_exp, bias):
     if vis_feat.dim() < 3:
         vis_feat = vis_feat.unsqueeze(dim=1)
-    logits = vis_feat @ txt_feat.permute(0, 2, 1) * temp + bias
+    logits = vis_feat @ txt_feat.permute(0, 2, 1) * temp_non_exp.exp() + bias
     probs = torch.sigmoid(logits)
     return probs
 
@@ -88,16 +88,15 @@ def create_siglip2_hf(args, device):
     processor = AutoProcessor.from_pretrained(args.model_version)
     def transform(x):
         d = processor(images=x, return_tensors="pt")
-        d['pixel_values'] = d['pixel_values'].squeeze(0)   # in-place replace
-        return d
+        return d['pixel_values'].squeeze(0)
     # transform = lambda x: processor(images=x, return_tensors="pt")['pixel_values'].squeeze(1) # removing the extra dimension
     target_transform = transforms.Compose([
         transforms.Resize((args.image_size, args.image_size)),
         transforms.ToTensor(),
     ])
     bias = model.logit_bias.to(device)
-    temperature = model.logit_scale.to(device).exp()
-    return vision_encoder, text_encoder, model.text_model.embeddings.token_embedding.embedding_dim, tokenizer, transform, target_transform, temperature, bias
+    temp_non_exp = model.logit_scale.to(device)
+    return vision_encoder, text_encoder, model.text_model.embeddings.token_embedding.embedding_dim, tokenizer, transform, target_transform, temp_non_exp, bias
 
 def regrid_upsample_smooth(flat_scores, size, sigma):
     upsampled = regrid_upsample(flat_scores, size)

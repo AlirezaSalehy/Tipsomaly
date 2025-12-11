@@ -33,7 +33,7 @@ class vision_encoder(nn.Module):
         return jax_to_torch(out['img/normalized']), jax_to_torch(out['img/normalized']), jax_to_torch(out['img/2d_normalized'])
     
     def _forward_siglip2_hf(_encoder, images):
-        image_features = _encoder(**images)
+        image_features = _encoder(images)
         return image_features.pooler_output, image_features.pooler_output, image_features.last_hidden_state
 
     def forward(self, images):
