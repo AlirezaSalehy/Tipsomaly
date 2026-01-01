@@ -1,18 +1,17 @@
 import hashlib
 import humanhash
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "model"))
 
 import torch
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from torchvision import transforms
-
-import os
 import random
 import numpy as np
 import pandas as pd 
 from tabulate import tabulate
 from tqdm import tqdm
-import sys
 import subprocess
 import argparse
 from scipy.ndimage import gaussian_filter
@@ -26,6 +25,9 @@ from utils.visualize import visualizer
 from utils.logger import save_args_to_file, get_logger
 
 from collections import defaultdict
+from model.big_vision import load_siglip
+from transformers import AutoProcessor, AutoModel, AutoTokenizer, SiglipTextModel, SiglipVisionModel
+from model.siglip2.siglip2_prompt_learnable import SiglipTextModelWithPromptLearning
 
 loss_names = {'img_ls_ce': 'LS CE', 'pxl_ls_fc': 'LS FC', \
                 'plx_ls_dc_p': 'LS DC P', 'plx_ls_dc_n': 'LS DC N', \
@@ -39,8 +41,61 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def calc_score(vis_feat, txt_feat, temp):
+def seed_worker(worker_id):
+    worker_seed = 111 + worker_id
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+def calc_soft_score(vis_feat, txt_feat, temp):
     return F.softmax((vis_feat @ txt_feat.permute(0, 2, 1))/temp, dim=-1)
+
+def calc_sigm_score(vis_feat, txt_feat, temp, bias):
+    if vis_feat.dim() < 3:
+        vis_feat = vis_feat.unsqueeze(dim=1)
+    tempered_logits = vis_feat @ txt_feat.permute(0, 2, 1) * temp
+    probs = 1 / (1 + np.exp(-tempered_logits - bias))
+    return F.softmax(probs, dim=-1)
+
+def calc_sigm_score_hf(vis_feat, txt_feat, temp_non_exp, bias):
+    if vis_feat.dim() < 3:
+        vis_feat = vis_feat.unsqueeze(dim=1)
+    logits = vis_feat @ txt_feat.permute(0, 2, 1) * temp_non_exp.exp() + bias
+    probs = torch.sigmoid(logits)
+    return probs
+
+def create_tips(args, device):
+    # load dataset 
+    transform, target_transform = input_transforms.create_transforms_tips(args.image_size)
+
+    # load model
+    vision_encoder, text_encoder, tokenizer, temperature = tips.load_model.get_model(args.models_dir, args.model_version)
+    return vision_encoder.to(device), text_encoder.to(device), text_encoder.transformer.width, tokenizer, transform, target_transform, temperature
+
+def create_siglip2(args, device):
+    transform, target_transform = load_siglip.create_preprocessors_siglip2(args.image_size)
+    vision_encoder, text_encoder, tokenizer = load_siglip.build_siglip_modules(args.model_version, args.image_size)
+    # model.to(device)
+
+    temperature, bias = text_encoder.params['t'], text_encoder.params['b']
+    temperature = np.exp(torch.from_numpy(np.array(temperature)))
+    return vision_encoder, text_encoder, text_encoder.model.out_dim[1], tokenizer, transform, target_transform, temperature, bias
+
+def create_siglip2_hf(args, device):
+    tokenizer = AutoTokenizer.from_pretrained(args.model_version)
+    model = AutoModel.from_pretrained(args.model_version)
+    text_encoder = SiglipTextModelWithPromptLearning.from_pretrained(args.model_version).to(device)
+    vision_encoder = SiglipVisionModel.from_pretrained(args.model_version).to(device)
+    processor = AutoProcessor.from_pretrained(args.model_version)
+    def transform(x):
+        d = processor(images=x, return_tensors="pt")
+        return d['pixel_values'].squeeze(0)
+    target_transform = transforms.Compose([
+        transforms.Resize((args.image_size, args.image_size)),
+        transforms.ToTensor(),
+    ])
+    bias = model.logit_bias.to(device)
+    temp_non_exp = model.logit_scale.to(device)
+    return vision_encoder, text_encoder, model.text_model.embeddings.token_embedding.embedding_dim, tokenizer, transform, target_transform, temp_non_exp, bias
 
 def regrid_upsample_smooth(flat_scores, size, sigma):
     upsampled = regrid_upsample(flat_scores, size)
@@ -194,34 +249,42 @@ def test(text_encoder, vision_encoder, prompt_class_names, device, test_loader, 
 def train(args):
     logger = get_logger(args.experiment_root)
     
+    device = 'cuda'
+    if args.backbone_name == 'tips':
+        bb_vision_encoder, bb_text_encoder, text_embd_dim, tokenizer, transform, target_transform, temperature = create_tips(args, device)
+        calc_score = lambda vis_feat, txt_feat: calc_soft_score(vis_feat, txt_feat, temperature)
+    elif args.backbone_name == "siglip2":
+        bb_vision_encoder, bb_text_encoder, text_embd_dim, tokenizer, transform, target_transform, temperature, bias  = create_siglip2(args, device)
+        calc_score = lambda vis_feat, txt_feat: calc_sigm_score(vis_feat, txt_feat, temperature, bias)
+    elif args.backbone_name == 'siglip2-hf':
+        bb_vision_encoder, bb_text_encoder, text_embd_dim, tokenizer, transform, target_transform, temperature, bias = create_siglip2_hf(args, device)
+        calc_score = lambda vis_feat, txt_feat: calc_sigm_score_hf(vis_feat, txt_feat, temperature, bias)
+
+    bb_text_encoder = bb_text_encoder.to(device)
+    bb_vision_encoder = bb_vision_encoder.to(device)
+    bb_text_encoder = turn_gradient_off(bb_text_encoder)
+    bb_vision_encoder = turn_gradient_off(bb_vision_encoder)
+    text_encoder = omaly.text_encoder(tokenizer, bb_text_encoder, args.backbone_name, text_embd_dim, 64, args.prompt_learn_method, args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
+    vision_encoder = omaly.vision_encoder(bb_vision_encoder, args.backbone_name)
+
     # load dataset 
-    image_size = 518 # 448 #224 if is_low_res else 448
-    learning_rate = 0.001
     epochs = args.epoch
-    transform, target_transform = input_transforms.create_transforms(image_size)
 
     # class_names = desc.dataset_dict[args.dataset]
     train_data = dataset.Dataset(args.data_path, transform, target_transform, args)    
-    test_data = dataset.Dataset([f'/data/alireza/datasets/{args.dataset_category}/visa/'], transform, target_transform, args)
+    # test_data = dataset.Dataset([f'/data/alireza/datasets/{args.dataset_category}/visa/'], transform, target_transform, args)
 
+    g = torch.Generator()
+    g.manual_seed(args.seed)
     train_loader = DataLoader(train_data, batch_size=8, shuffle=True,  
-                                num_workers=8, pin_memory=True, prefetch_factor=2)    
-    test_loader = DataLoader(test_data, batch_size=8, shuffle=False,
-                                num_workers=8, pin_memory=True, prefetch_factor=2)
+                                num_workers=8, pin_memory=True, prefetch_factor=2, generator=g, worker_init_fn=seed_worker)    
+    # test_loader = DataLoader(test_data, batch_size=8, shuffle=False,
+                                # num_workers=8, pin_memory=True, prefetch_factor=2)
 
     # class_names = [clss.replace('_', ' ') for clss in train_data.cls_names]
     # class_ids = train_data.class_ids
     class_names = ['object']
     class_ids = torch.tensor([0])
-    
-    # load model
-    device = 'cuda'
-    tips_vision_encoder, tips_text_encoder, tokenizer, temperature = tips.load_model.get_model(args.models_dir, args.model_version)
-    tips_text_encoder = turn_gradient_off(tips_text_encoder)
-    tips_vision_encoder = turn_gradient_off(tips_vision_encoder)
-    
-    text_encoder = omaly.text_encoder(tokenizer, tips_text_encoder.to(device), 64, args.prompt_learn_method, args.prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
-    vision_encoder = omaly.vision_encoder(tips_vision_encoder.to(device))
     
     # Define losses 
     bce_loss = torch.nn.CrossEntropyLoss()
@@ -231,7 +294,7 @@ def train(args):
     # Define optimizer
     optimizer = torch.optim.Adam(
         list(text_encoder.learnable_prompts),# + list(text_encoder.deep_parameters),
-        lr=learning_rate,
+        lr=args.learning_rate,
         betas=(0.5, 0.999)
     )
     train_stats = defaultdict(list)
@@ -267,11 +330,11 @@ def train(args):
                 vision_features = [feature / feature.norm(dim=-1, keepdim=True) for feature in vision_features] # NOTE: for test also
                 
             # calculate normal/abnormal scores
-            img_scr0 = calc_score(vision_features[0], text_features[class_ids], temperature).squeeze(dim=1)
-            img_scr1 = calc_score(vision_features[1], text_features[class_ids], temperature).squeeze(dim=1)
+            img_scr0 = calc_score(vision_features[0], text_features[class_ids]).squeeze(dim=1)
+            img_scr1 = calc_score(vision_features[1], text_features[class_ids]).squeeze(dim=1)
             
-            img_map = calc_score(vision_features[2], text_features[class_ids], temperature)
-            anomaly_map = regrid_upsample(img_map, image_size)
+            img_map = calc_score(vision_features[2], text_features[class_ids])
+            anomaly_map = regrid_upsample(img_map, args.image_size)
             abnorm_mask[abnorm_mask > 0.5], abnorm_mask[abnorm_mask< 0.5] = 1, 0
 
             # Calculate loss
@@ -362,6 +425,7 @@ if __name__ == '__main__':
     parser.add_argument("--seed", type=int, default=111, help="random seed")
 
     parser.add_argument("--epoch", type=int, default=5, help="epochs")
+    parser.add_argument("--learning_rate", type=float, default=0.001)
 
     parser.add_argument("--metrics", type=str, default='image-pixel-level')
     parser.add_argument("--devices", type=int, nargs='+', default=[0, 1, 2, 3, 4, 5, 6, 7], help="array of possible cuda devices")
@@ -385,17 +449,20 @@ if __name__ == '__main__':
     parser.add_argument("--visualize", type=str2bool, default=False)
 
     ##########################
-    parser.add_argument("--model_version", type=str, default='l14h', choices=["s14h","b14h","l14h","so4h","g14l","g14h"])
+    parser.add_argument("--model_version", type=str, default='l14h', choices=["s14h","b14h","l14h","so4h","g14l","g14h", \
+                                                                                "B/16", "L/16", "So400m/14", "So400m/16", "g-opt/16", \
+                                                                                    "google/siglip2-so400m-patch16-256", "google/siglip2-large-patch16-512"])
     parser.add_argument("--models_dir", type=str, default='/home/alireza/.cache/tips/')
     
     parser.add_argument("--n_deep_tokens", type=int, default=0)
     parser.add_argument("--d_deep_tokens", type=int, default=0)
     parser.add_argument("--n_prompt", type=int, default=8)
-    parser.add_argument("--prompt_type", type=str, default='industrial')
+    parser.add_argument("--fixed_prompt_type", type=str, default='industrial')
     
     parser.add_argument("--prompt_learn_method", type=str, default='concat', choices=['concat', 'sumate', 'entire_learnable', 'none'])
     parser.add_argument("--cls_seg_los", type=str, default='seg', choices=['both', 'seg', 'cls'])
     parser.add_argument("--l1_lambda", type=float, default=0.0)
+    parser.add_argument("--backbone_name", type=str, default='tips', choices=["tips", "siglip2", "siglip2-hf"])
 
     args = parser.parse_args()        
     command = [sys.executable, __file__, ] + sys.argv[1:] 
@@ -408,7 +475,7 @@ if __name__ == '__main__':
         print(args)
         setup_seed(args.seed)
         args.log_dir = make_human_readable_name(args)
-        args.data_path = [f'/data/alireza/datasets/{args.dataset_category}/{ds}/' for ds in args.dataset]
+        args.data_path = [f'/home/alireza/datasets/{args.dataset_category}/{ds}/' for ds in args.dataset]
         args.experiment_root = f'./workspaces/trained_on_{"_".join(args.dataset)}_{args.model_name}/{args.log_dir}'
         args.save_path = f'{args.experiment_root}/checkpoints'
         os.makedirs(args.save_path, exist_ok=True)

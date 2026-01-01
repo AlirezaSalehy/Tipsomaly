@@ -1,12 +1,12 @@
 
 # The very first ones
-# self.prompt_templates = ['a bad photo of a {}.',
+# prompt_templates = ['a bad photo of a {}.',
 #                          'a low resolution photo of the {}.',
 #                          'a bad photo of the {}.',
 #                          'a cropped photo of the {}.',
 #                          ]
 def generate_prompt_templates(prompt_type):
-    if prompt_type == 'medical_low':
+    if prompt_type == 'medical_low_1':
         prompt_normal = [
             'normal {}',
             'healthy {}',
@@ -39,7 +39,131 @@ def generate_prompt_templates(prompt_type):
             'a scan of the {}.',
             'a clinical brain scan of a {}.'
         ]
-    
+        
+    elif prompt_type == 'medical_low_2':
+        prompt_normal = [
+            'normal {}',
+            'healthy {}',
+            '{} with uniform structure',
+            '{} showing clear tissue',
+            '{} with normal brain anatomy',
+            '{} showing no distortion',
+            '{} with symmetric appearance',
+            '{} looking normal',
+        ]
+        prompt_abnormal = [
+            'abnormal {}',
+            '{} with lesion',
+            '{} with tumor',
+            '{} with hemorrhage',
+            '{} with abnormality',
+            'diseased {}',
+            '{} showing distortion',
+            '{} with strange shape',
+            '{} with irregular area',
+            '{} with structural abnormality',
+            '{} showing diseased tissue',
+
+        ]
+        # Prompt templates adapted for medical images
+        prompt_templates = [
+            'a medical image of a {}.',
+            'a medical image of the {}.',
+            'a diagnostic scan of a {}.',
+            'a diagnostic scan of the {}.',
+            'a slice showing a {}.',
+            'a slice showing the {}.',
+            'a CT scan of the {}.',
+            'a clinical brain scan of a {}.'
+        ]
+
+    elif prompt_type == 'medical_low_3':
+        prompt_normal = [
+            'normal {}',
+            'healthy {}',
+            'clear {}',
+            'clean {}',
+            'smooth {}',
+            '{} with sharp boundaries',
+            '{} showing clear brain tissue',
+            '{} with even texture',
+            '{} with balanced gray levels',
+            '{} with regular shape',
+            '{} showing smooth patterns',
+            '{} with normal brain structure',
+            '{} scan with clean look',
+            '{} with clear details',
+            '{} looking uniform'
+        ]
+        prompt_abnormal = [
+            'abnormal {}',
+            '{} with spot',
+            '{} with unclear boundary',
+            '{} with mass',
+            '{} with patchy area',
+            '{} with irregular shape',
+            '{} with distorted structure',
+            '{} scan with strange region',
+            '{} with uneven texture',
+            '{} with extra tissue'
+        ]
+        prompt_templates = [
+            'a scan of a {}.',
+            'a scan of the {}.',
+            'an image of a {}.',
+            'an image of the {}.',
+            'a slice of a {}.',
+            'a slice of the {}.',
+            'a brain scan showing a {}.',
+            'a CT image of a {}.',
+            'an MRI image of a {}.',
+            'a cross-section of a {}.',
+            'a close-up scan of a {}.',
+            'a medical scan of a {}.',
+            'a brain image of a {}.',
+            'a diagnostic slice of a {}.'
+        ]
+
+    elif prompt_type == 'medical_low_4':
+        prompt_normal = [
+            'normal {}',
+            'healthy {}',
+            'intact {}',
+            '{} with uniform structure',
+            '{} showing clear tissue',
+            '{} with normal anatomy',
+            '{} showing no distortion',
+            '{} with symmetric appearance',
+            '{} looking normal',
+            '{} with even texture',
+            '{} with regular shape',
+            '{} scan with clean look',  
+        ]
+
+        prompt_abnormal = [
+            'abnormal {}',
+            '{} with spot',
+            '{} with abnormality',
+            'diseased {}',
+            '{} showing distortion',
+            '{} with strange shape',
+            '{} with irregular area',
+            '{} with irregular shape',
+            '{} scan with strange region',
+            '{} with uneven texture',
+        ]
+
+        prompt_templates = [
+            'a medical image of a {}.',
+            'a medical image of the {}.',
+            'a diagnostic scan of a {}.',
+            'a diagnostic scan of the {}.',
+            'a slice showing a {}.',
+            'a slice showing the {}.',
+            'a scan of the {}.',
+            'a clinical brain scan of a {}.'
+        ]
+
     elif prompt_type == 'medical_high':
         prompt_normal = [
             '{} showing regular tissue appearance',
@@ -78,8 +202,10 @@ def generate_prompt_templates(prompt_type):
     
     elif prompt_type == 'object_agnostic':
         prompt_normal = ['{}']
+        # prompt_normal = ['normal {}']
         prompt_abnormal = ['damaged {}']
         prompt_templates = ['{}']
+        # prompt_templates = ['a photo of a {}']
         
     elif prompt_type == 'industrial':
         prompt_normal = ['{}', 'flawless {}', 'perfect {}', 'unblemished {}', '{} without flaw',
@@ -95,89 +221,15 @@ def generate_prompt_templates(prompt_type):
                                 'a photo of the {} for visual inspection',
                                 'a photo of a {} for visual inspection',
                                 ]
+        
+    elif prompt_type == 'industrial_stupid':
+        prompt_normal = ['{}', 'flawless {}', 'perfect {}', 'unblemished {}', '{} without flaw',
+                            '{} without defect',
+                            '{} without damage']
+        prompt_abnormal = ['damaged {}', 'broken {}', '{} with flaw', '{} with defect', '{} with damage']
+        prompt_templates = ['a bad photo of a {}.',
+                            'a low resolution photo of the {}.',
+                            'a bad photo of the {}.',
+                            'a cropped photo of the {}.',
+                            ]        
     return prompt_normal, prompt_abnormal, prompt_templates
-
-
-    # # Normal vs abnormal prompts (medical style)
-    # self.prompt_normal = [
-    #     'normal {}',
-    #     'healthy {}',
-    #     '{} with uniform structure',
-    #     '{} showing clear tissue',
-    #     '{} with normal brain anatomy',
-    #     '{} showing no distortion',
-    #     '{} with symmetric appearance',
-    #     '{} looking normal',
-    # ]
-    # self.prompt_abnormal = [
-    #     'abnormal {}',
-    #     '{} with lesion',
-    #     '{} with tumor',
-    #     '{} with hemorrhage',
-    #     '{} with abnormality',
-    #     'diseased {}',
-    #     '{} showing distortion',
-    #     '{} with strange shape',
-    #     '{} with irregular area',
-    #     '{} with structural abnormality',
-    #     '{} showing diseased tissue',
-
-    # ]
-    # # Prompt templates adapted for medical images
-    # self.prompt_templates = [
-    #     'a medical image of a {}.',
-    #     'a medical image of the {}.',
-    #     'a diagnostic scan of a {}.',
-    #     'a diagnostic scan of the {}.',
-    #     'a slice showing a {}.',
-    #     'a slice showing the {}.',
-    #     'a CT scan of the {}.',
-    #     'a clinical brain scan of a {}.'
-    # ]
-
-    ###################################################
-    # self.prompt_normal = [
-    #     'normal {}',
-    #     'healthy {}',
-    #     'clear {}',
-    #     'clean {}',
-    #     'smooth {}',
-    #     '{} with sharp boundaries',
-    #     '{} showing clear brain tissue',
-    #     '{} with even texture',
-    #     '{} with balanced gray levels',
-    #     '{} with regular shape',
-    #     '{} showing smooth patterns',
-    #     '{} with normal brain structure',
-    #     '{} scan with clean look',
-    #     '{} with clear details',
-    #     '{} looking uniform'
-    # ]
-    # self.prompt_abnormal = [
-    #     'abnormal {}',
-    #     '{} with spot',
-    #     '{} with unclear boundary',
-    #     '{} with mass',
-    #     '{} with patchy area',
-    #     '{} with irregular shape',
-    #     '{} with distorted structure',
-    #     '{} scan with strange region',
-    #     '{} with uneven texture',
-    #     '{} with extra tissue'
-    # ]
-    # self.prompt_templates = [
-    #     'a scan of a {}.',
-    #     'a scan of the {}.',
-    #     'an image of a {}.',
-    #     'an image of the {}.',
-    #     'a slice of a {}.',
-    #     'a slice of the {}.',
-    #     'a brain scan showing a {}.',
-    #     'a CT image of a {}.',
-    #     'an MRI image of a {}.',
-    #     'a cross-section of a {}.',
-    #     'a close-up scan of a {}.',
-    #     'a medical scan of a {}.',
-    #     'a brain image of a {}.',
-    #     'a diagnostic slice of a {}.'
-    # ]
