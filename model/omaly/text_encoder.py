@@ -79,7 +79,6 @@ class text_encoder(nn.Module):
                 class_embedding = class_embedding / class_embedding.norm(dim=-1, keepdim=True)
             
             elif self.model == 'siglip2':
-                # We'll accumulate sums in JAX so final mean+normalize happens exactly like original.
                 num_prompts = len(prompted_sentence)
                 if num_prompts == 0:
                     class_embedding = torch.zeros(getattr(self, "expected_text_dim", 512), device=device)
@@ -114,19 +113,19 @@ class text_encoder(nn.Module):
                     else:
                         sum_jax = sum_jax + batch_sum
 
-                # now compute mean in JAX (exactly as original did: mean then normalize)
+                # now compute mean in JAX
                 mean_jax = sum_jax / float(num_prompts)
                 mean_jax = mean_jax / (jnp.linalg.norm(mean_jax, axis=-1, keepdims=True) + 1e-8)
 
                 # convert final normalized mean to torch once
                 class_embedding = jax_to_torch(mean_jax)  # shape: (dim,)
-            elif self.model == 'siglip2-hf': # for train
+            elif self.model == 'siglip2-hf':
                 ids = self.tokenizer(text=prompted_sentence, padding="max_length", max_length=self.MAX_LEN, return_tensors="pt")
                 ztxt = self._encoder(ids['input_ids'].to(device), learnable_prompts=learnables, learning_method=self.prompt_learn_method).pooler_output
                 ztxt = ztxt / ztxt.norm(dim=-1, keepdim=True).clamp(min=1e-3)
                 ztxt = ztxt.mean(dim=0)
                 class_embedding = ztxt / ztxt.norm(dim=-1, keepdim=True)
-            # elif self.model == 'siglip2-hf': # for test
+            # elif self.model == 'siglip2-hf': # NOTE: Use this block if you lack enough memory for encoding text input
             #     num_prompts = len(prompted_sentence)
             #     if num_prompts == 0:
             #         class_embedding = torch.zeros(getattr(self, "expected_text_dim", 512), device=device)

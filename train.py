@@ -89,7 +89,6 @@ def create_siglip2_hf(args, device):
     def transform(x):
         d = processor(images=x, return_tensors="pt")
         return d['pixel_values'].squeeze(0)
-    # transform = lambda x: processor(images=x, return_tensors="pt")['pixel_values'].squeeze(1) # removing the extra dimension
     target_transform = transforms.Compose([
         transforms.Resize((args.image_size, args.image_size)),
         transforms.ToTensor(),
@@ -476,7 +475,7 @@ if __name__ == '__main__':
         print(args)
         setup_seed(args.seed)
         args.log_dir = make_human_readable_name(args)
-        args.data_path = ['/kaggle/input/mvtec-ad/mvtec_anomaly_detection']
+        args.data_path = [f'/home/alireza/datasets/{args.dataset_category}/{ds}/' for ds in args.dataset]
         args.experiment_root = f'./workspaces/trained_on_{"_".join(args.dataset)}_{args.model_name}/{args.log_dir}'
         args.save_path = f'{args.experiment_root}/checkpoints'
         os.makedirs(args.save_path, exist_ok=True)

@@ -25,13 +25,11 @@ from utils.metrics import image_level_metrics, pixel_level_metrics
 from utils.visualize import visualizer
 from utils.logger import get_logger, read_train_args
 from transformers import AutoProcessor, AutoModel, AutoTokenizer, SiglipTextModel, SiglipVisionModel
+from model.siglip2.siglip2_prompt_learnable import SiglipTextModelWithPromptLearning
 
 ####################3
 
 from model.big_vision import load_siglip
-
-# def pixel_level_metrics(a,b,c):
-    # return 0
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -50,13 +48,6 @@ def calc_sigm_score(vis_feat, txt_feat, temp, bias):
     tempered_logits = vis_feat @ txt_feat.permute(0, 2, 1) * temp
     probs = 1 / (1 + np.exp(-tempered_logits - bias))
     return F.softmax(probs, dim=-1)
-
-# def calc_sigm_score_hf(vis_feat, txt_feat, temp, bias):
-#     logits_per_text = torch.matmul(txt_feat, vis_feat.t())
-#     logits_per_text = logits_per_text * temp + bias
-#     logits_per_image = logits_per_text.t()
-#     probs = torch.sigmoid(logits_per_image)
-#     return F.softmax(probs, dim=-1)
 
 def calc_sigm_score_hf(vis_feat, txt_feat, temp, bias):
     if vis_feat.dim() < 3:
@@ -95,14 +86,12 @@ def create_siglip2(args, device):
 def create_siglip2_hf(args, device):
     tokenizer = AutoTokenizer.from_pretrained(args.model_version)
     model = AutoModel.from_pretrained(args.model_version)
-    text_encoder = SiglipTextModel.from_pretrained(args.model_version).to(device)
+    text_encoder = SiglipTextModelWithPromptLearning.from_pretrained(args.model_version).to(device)
     vision_encoder = SiglipVisionModel.from_pretrained(args.model_version).to(device)
     processor = AutoProcessor.from_pretrained(args.model_version)
     def transform(x):
         d = processor(images=x, return_tensors="pt")
-        d['pixel_values'] = d['pixel_values'].squeeze(0)   # in-place replace
-        return d
-    # transform = lambda x: processor(images=x, return_tensors="pt")['pixel_values'].squeeze(1) # removing the extra dimension
+        return d['pixel_values'].squeeze(0)
     target_transform = transforms.Compose([
         transforms.Resize((args.image_size, args.image_size)),
         transforms.ToTensor(),
@@ -127,7 +116,7 @@ def test(args):
         bb_vision_encoder, bb_text_encoder, text_embd_dim, tokenizer, transform, target_transform, temperature, bias = create_siglip2_hf(args, device)
         calc_score = lambda vis_feat, txt_feat: calc_sigm_score_hf(vis_feat, txt_feat, temperature, bias)
 
-    text_encoder = omaly.text_encoder(tokenizer, bb_text_encoder, args.backbone_name, text_embd_dim, 64, 'none', args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
+    text_encoder = omaly.text_encoder(tokenizer, bb_text_encoder, args.backbone_name, text_embd_dim, 64, args.prompt_learn_method, args.fixed_prompt_type, args.n_prompt, args.n_deep_tokens, args.d_deep_tokens)
     vision_encoder = omaly.vision_encoder(bb_vision_encoder, args.backbone_name)
 
     # class_names = desc.dataset_dict[args.dataset]
@@ -181,16 +170,10 @@ def test(args):
         with torch.no_grad():
             vision_features = vision_encoder(image)
             vision_features = [feature / feature.norm(dim=-1, keepdim=True) for feature in vision_features] # NOTE: for test also
-            # print(vision_features[0].shape)
-            # print(vision_features[2].shape)
-            # print(cls_text_features[cls_class_ids].shape)
-            # print(cls_text_features.shape)
 
             # calculate normal/abnormal scores
             img_scr0 = calc_score(vision_features[0], cls_text_features[cls_class_ids]).squeeze(dim=1).detach() # prompt_class_ids cls_ids
             img_scr1 = calc_score(vision_features[1], cls_text_features[cls_class_ids]).squeeze(dim=1).detach()
-            # print(img_scr0.shape)
-            # print(img_scr1.shape)
 
             img_map = calc_score(vision_features[2], seg_text_features[seg_class_ids])
             if args.aggregate_local2global:
@@ -199,7 +182,6 @@ def test(args):
                 img_scr1 = img_scr1 + max_local
                 
             pxl_scr = regrid_upsample_smooth(img_map.detach(), args.image_size, args.sigma)
-            # print(pxl_scr.shape)
             
         for idx, cls_id in enumerate(batch['cls_id'].cpu().numpy()):
             dataset_preds[cls_id]['img_scrs'].append([img_scr0[idx][1].cpu(), img_scr1[idx][1].cpu()])
@@ -326,7 +308,7 @@ if __name__ == '__main__':
         #### ONLY KAGGLE
         args.dataset = f'{args.dataset}-ad'
         base_paths = [Path(p) for p in [f'{ROOT_DIR}/{args.dataset_category}/{args.dataset}/']]
-        args.data_path = ['/kaggle/input/mvtec-ad/mvtec_anomaly_detection']
+        args.data_path = [str(next(p.iterdir())) for p in base_paths]
         
         # args.data_path = [f'{ROOT_DIR}/datasets/{args.dataset_category}/{args.dataset}/']
         if not args.checkpoint_path:
