@@ -21,7 +21,7 @@
 # model="prompt_learning_deeptuning_segonly_518"
 # log_fir="three_mockingbird"
 
-model_version=$5 # 'l14h' # l14h or l14
+model_version='g14h' # l14h or l14
 
 model_name=$1
 log_dir=$2
@@ -36,18 +36,17 @@ for dataset in visa mpdd btad sdd; do
     OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python test.py --checkpoint_path ./workspaces/trained_on_mvtec_$model_name/$log_dir/checkpoints --dataset $dataset --devices $device  --epoch $epoch --model_version $model_version --fixed_prompt_type industrial
 done
 
-# ADD DATASETS AGAIN
 # python test.py --checkpoint_path ./workspaces/trained_on_visa_$model_name/$log_dir/checkpoints --dataset mvtec --devices $device --epoch $epoch --model_version $model_version --fixed_prompt_type industrial
 # for dataset in visa mpdd btad sdd dagm dtd; do
 #     OMP_NUM_THREADS=2 MKL_NUM_THREADS=1 python test.py --checkpoint_path ./workspaces/trained_on_mvtec_$model_name/$log_dir/checkpoints --dataset $dataset --devices $device  --epoch $epoch --model_version $model_version --fixed_prompt_type industrial
 # done
 
 # for dataset in headct brainmri br35h; do
-#     OMP_NUM_THREADS=2 MKL_NUM_THREADS=1 python test.py --checkpoint_path ./workspaces/trained_on_mvtec_$model_name/$log_dir/checkpoints  --dataset $dataset --devices $device --fixed_prompt_type medical_low --epoch $epoch --model_version $model_version
+#     OMP_NUM_THREADS=2 MKL_NUM_THREADS=1 python test.py --checkpoint_path ./workspaces/trained_on_mvtec_$model_name/$log_dir/checkpoints  --dataset $dataset --dataset_category med --devices $device --fixed_prompt_type medical_low --epoch $epoch --model_version $model_version
 # done
 
 # for dataset in isic tn3k cvc-colondb cvc-clinicdb; do
-#     OMP_NUM_THREADS=2 MKL_NUM_THREADS=1 python test.py --checkpoint_path ./workspaces/trained_on_mvtec_$model_name/$log_dir/checkpoints  --dataset $dataset --devices $device --fixed_prompt_type industrial --epoch $epoch --model_version $model_version
+#     OMP_NUM_THREADS=2 MKL_NUM_THREADS=1 python test.py --checkpoint_path ./workspaces/trained_on_mvtec_$model_name/$log_dir/checkpoints  --dataset $dataset --dataset_category med --devices $device --fixed_prompt_type industrial --epoch $epoch --model_version $model_version
 # done
 
 # # closeness prevention regulation 

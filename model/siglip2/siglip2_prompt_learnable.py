@@ -82,7 +82,7 @@ class SiglipTextTransformerWithPromptLearning(SiglipTextTransformer):
         self.embeddings = SiglipTextEmbeddingsWithPromptLearning(config)
     
     @can_return_tuple
-    @auto_docstring
+    # @auto_docstring
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,
@@ -146,7 +146,7 @@ class SiglipTextModelWithPromptLearning(SiglipPreTrainedModel):
         self.text_model.embeddings.token_embedding = value
 
     @check_model_inputs(tie_last_hidden_states=False)
-    @auto_docstring
+    # @auto_docstring
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,

@@ -102,6 +102,8 @@ def create_siglip2_hf(args, device):
 
 def test(args):
     logger = get_logger(args.save_path)
+    # load dataset 
+    transform, target_transform = input_transforms.create_transforms(args.image_size)
 
     device = 'cuda'
     if args.backbone_name == 'tips':
@@ -121,8 +123,7 @@ def test(args):
 
     # class_names = desc.dataset_dict[args.dataset]
     test_data = dataset.Dataset(args.data_path, transform, target_transform, args)
-    test_loader = DataLoader(test_data, batch_size=8, shuffle=False)
-    # test_loader = DataLoader(test_data, batch_size=8, shuffle=False, num_workers=1, prefetch_factor=2, pin_memory=True)
+    test_loader = DataLoader(test_data, batch_size=8, shuffle=False, num_workers=1, prefetch_factor=2, pin_memory=True)
     fixed_class_names = [clss.replace('_', ' ') for clss in test_data.cls_names]
     
     # extract features
@@ -134,8 +135,8 @@ def test(args):
     
     if args.checkpoint_path:
         assert not args.prompt_learn_method == 'none', 'The prompt_learn_method should not be none'
-        checkpoint = torch.load(args.params_path, weights_only=False)
-        text_encoder.learnable_prompts = checkpoint["learnable_prompts"] if isinstance(checkpoint, dict) else checkpoint
+        chekpoint = torch.load(args.params_path, weights_only=False)
+        text_encoder.learnable_prompts = chekpoint["learnable_prompts"]
         # text_encoder.learnable_prompts = chekpoint
         # text_encoder.deep_parameters = chekpoint["deep_parameters"]
         
@@ -213,7 +214,7 @@ def test(args):
         if args.visualize:
             img_path = f"{args.dataset}/{dataset_preds[cls_id]['name']}"
             visualizer(dataset_preds[cls_id]['paths'], pxl_prds.cpu().numpy(), pxl_lbls.cpu().numpy(), args.image_size, img_path, save_path=f'{args.save_path}/img/', draw_contours=True)
-        
+            
         dataset_results.append(cls_results)
         
     df = pd.DataFrame(dataset_results, columns=header)
