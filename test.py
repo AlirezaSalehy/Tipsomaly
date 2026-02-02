@@ -20,12 +20,14 @@ import argparse
 from scipy.ndimage import gaussian_filter
 
 from model import tips, omaly
-from datasets import input_transforms, dataset, desc
+from datasets import input_transforms, dataset
 from utils.metrics import image_level_metrics, pixel_level_metrics
 from utils.visualize import visualizer
 from utils.logger import get_logger, read_train_args
 from transformers import AutoProcessor, AutoModel, AutoTokenizer, SiglipTextModel, SiglipVisionModel
 from model.siglip2.siglip2_prompt_learnable import SiglipTextModelWithPromptLearning
+
+from . import CACHE_ROOT_DIR, DATA_ROOT_DIR
 
 ####################3
 
@@ -103,9 +105,8 @@ def create_siglip2_hf(args, device):
 def test(args):
     logger = get_logger(args.save_path)
     # load dataset 
-    transform, target_transform = input_transforms.create_transforms(args.image_size)
 
-    device = 'cuda'
+    device = 'cpu'
     if args.backbone_name == 'tips':
         bb_vision_encoder, bb_text_encoder, text_embd_dim, tokenizer, transform, target_transform, temperature = create_tips(args, device)
         calc_score = lambda vis_feat, txt_feat: calc_soft_score(vis_feat, txt_feat, temperature)
@@ -123,7 +124,8 @@ def test(args):
 
     # class_names = desc.dataset_dict[args.dataset]
     test_data = dataset.Dataset(args.data_path, transform, target_transform, args)
-    test_loader = DataLoader(test_data, batch_size=8, shuffle=False, num_workers=1, prefetch_factor=2, pin_memory=True)
+    test_loader = DataLoader(test_data, num_workers=0)
+    # test_loader = DataLoader(test_data, batch_size=8, shuffle=False, num_workers=1, prefetch_factor=2, pin_memory=True)
     fixed_class_names = [clss.replace('_', ' ') for clss in test_data.cls_names]
     
     # extract features
@@ -252,7 +254,6 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 if __name__ == '__main__':
-    ROOT_DIR='/kaggle/input'
     parser = argparse.ArgumentParser("TIPSomaly", add_help=True)
     # model
     parser.add_argument("--image_size", type=int, default=518, help="image size") #224 if is_low_res else 448
@@ -260,8 +261,8 @@ if __name__ == '__main__':
 
     parser.add_argument("--metrics", type=str, default='image-pixel-level')
     parser.add_argument("--devices", type=int, nargs='+', default=[0, 1, 2, 3, 4, 5, 6, 7], help="array of possible cuda devices")
-    parser.add_argument("--model_name", type=str, default="tips_test", help="")
-    parser.add_argument("--checkpoint_path", type=str, default=None, help="")
+    parser.add_argument("--model_name", type=str, default="trained_on_visa_siglip2_both_mvtec", help="")
+    parser.add_argument("--checkpoint_path", type=str, default='None', help="")
     parser.add_argument("--epoch", type=int, default=1, help="")
 
     parser.add_argument("--sigma", type=int, default=4, help="zero shot")
@@ -274,29 +275,31 @@ if __name__ == '__main__':
     parser.add_argument("--image_metrics", type=str, nargs='+', default=['auroc', 'ap', 'f1-max'], help="")
     parser.add_argument("--pixel_metrics", type=str, nargs='+', default=['auroc', 'aupro', 'f1-max'], help="")
 
-    parser.add_argument("--k_shot", type=int, default=16, help="number of samples per class for few-shot learning. 0 means use all data.")
+    parser.add_argument("--k_shot", type=int, default=0, help="number of samples per class for few-shot learning. 0 means use all data.")
     
-    parser.add_argument("--type", type=str, default='train') 
+    parser.add_argument("--type", type=str, default='test') 
     parser.add_argument("--visualize", type=str2bool, default=False)
     parser.add_argument("--log_dir", type=str, default="")
     
     ##########################
+    ### Method Arguements ####
     parser.add_argument("--backbone_name", type=str, default='tips', choices=["tips", "siglip2", "siglip2-hf"])
     parser.add_argument("--model_version", type=str, default='l14h', choices=["s14h","b14h","l14h","so4h","g14l","g14h", \
                                                                                 "B/16", "L/16", "So400m/14", "So400m/16", "g-opt/16", \
                                                                                 "google/siglip2-so400m-patch16-256", "google/siglip2-large-patch16-512"])
-    parser.add_argument("--models_dir", type=str, default='{ROOT_DIR}/.cache/tips/')
     
     parser.add_argument("--n_deep_tokens", type=int, default=0)
     parser.add_argument("--d_deep_tokens", type=int, default=0)
     parser.add_argument("--n_prompt", type=int, default=8)
-    parser.add_argument("--fixed_prompt_type", type=str, default='industrial', choices=['industrial', 'medical_low_1', 'medical_low_2', 'medical_low_3', 'medical_low_4', 'medical_high', 'object_agnostic'])
+    parser.add_argument("--fixed_prompt_type", type=str, default='industrial', choices=['industrial', 'medical', 'object_agnostic'])
     
     parser.add_argument("--prompt_learn_method", type=str, default='concat', choices=['concat', 'sumate', 'entire_learnable', 'none'])
     parser.add_argument("--decoupled_prompt", type=str2bool, default=True)
     parser.add_argument("--aggregate_local2global", type=str2bool, default=True)
     
     args = parser.parse_args()
+    args.models_dir=f'{CACHE_ROOT_DIR}/.cache/{args.backbone_name}/'
+
     if 'CUDA_VISIBLE_DEVICES' not in os.environ:
         os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, args.devices))
         command = [sys.executable, __file__, ] + sys.argv[1:] 
@@ -307,11 +310,11 @@ if __name__ == '__main__':
         setup_seed(args.seed)
 
         #### ONLY KAGGLE
-        args.dataset = f'{args.dataset}-ad'
-        base_paths = [Path(p) for p in [f'{ROOT_DIR}/{args.dataset_category}/{args.dataset}/']]
-        args.data_path = [str(next(p.iterdir())) for p in base_paths]
+        # args.dataset = f'{args.dataset}-ad'
+        # base_paths = [Path(p) for p in [f'{DATA_ROOT_DIR}/{args.dataset_category}/{args.dataset}/']]
+        # args.data_path = [str(next(p.iterdir())) for p in base_paths]
         
-        # args.data_path = [f'{ROOT_DIR}/datasets/{args.dataset_category}/{args.dataset}/']
+        args.data_path = [f'{DATA_ROOT_DIR}/datasets/{args.dataset_category}/{args.dataset}/']
         if not args.checkpoint_path:
             args.log_dir = make_human_readable_name(args)
             args.save_path = f'./workspaces/{args.model_name}/{args.log_dir}/quantative/NoTrain/{args.dataset}'

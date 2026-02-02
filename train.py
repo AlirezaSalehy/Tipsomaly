@@ -20,11 +20,14 @@ from transformers import AutoProcessor, AutoModel, AutoTokenizer, SiglipTextMode
 from datasets import input_transforms, dataset
 from utils.loss import FocalLoss, BinaryDiceLoss
 from utils.logger import save_args_to_file, get_logger
+from torch.utils.tensorboard import SummaryWriter
 
 from model import tips
 from model import omaly
 from model.big_vision import load_siglip
 from model.siglip2.siglip2_prompt_learnable import SiglipTextModelWithPromptLearning
+
+from . import CACHE_ROOT_DIR, DATA_ROOT_DIR
 
 loss_names = {'img_ls_ce': 'LS CE', 'pxl_ls_fc': 'LS FC', \
                 'plx_ls_dc_p': 'LS DC P', 'plx_ls_dc_n': 'LS DC N', \
@@ -123,6 +126,7 @@ def train(args):
     epochs = args.epoch
     device = 'cpu'
 
+    writer = SummaryWriter(log_dir=args.experiment_root)
     logger = get_logger(args.experiment_root)
     
     if args.backbone_name == 'tips':
@@ -149,8 +153,9 @@ def train(args):
 
     g = torch.Generator()
     g.manual_seed(args.seed)
-    train_loader = DataLoader(train_data, batch_size=8, shuffle=True,  
-                                num_workers=8, prefetch_factor=2, generator=g, worker_init_fn=seed_worker)    
+    train_loader = DataLoader(train_data, num_workers=0)
+    # train_loader = DataLoader(train_data, batch_size=8, shuffle=True,  
+                                # num_workers=8, prefetch_factor=2, generator=g, worker_init_fn=seed_worker)    
     # test_loader = DataLoader(test_data, batch_size=8, shuffle=False,
                                 # num_workers=8, pin_memory=True, prefetch_factor=2)
 
@@ -175,6 +180,8 @@ def train(args):
     torch.autograd.set_detect_anomaly(True)
     train_loader_cpu = [bat for bat in train_loader]
     
+    global_step = 0
+
     text_encoder.train() 
     text_encoder.to(device)
     vision_encoder.train() 
@@ -236,11 +243,13 @@ def train(args):
             epoch_loss['epc_ls'] += loss_total.item()
             epoch_loss['emb_l1_nrm'] += l1_norm.item()
 
-            # Update tqdm description with current loss values
-            tqdm.write(f"CE: {ls_cls.item():.4f}, FC: {ls_fc.item():.4f}, " + \
-                       f"DC P: {ls_dc_p.item():.4f}, DC N: {ls_dc_n.item():.4f}, " + \
-                       f"L1: {l1_norm.item():.4f}") 
-
+            # Tensorboard update for each batch
+            num_batches = len(train_loader)
+            for key, val in epoch_loss.items():
+                writer.add_scalar(f"Loss/{loss_names[key]}", val[-1], global_step)
+            global_step += 1
+        
+        # Calc epoch mean loss
         num_batches = len(train_loader)
         for key, val in epoch_loss.items():
             train_stats[key].append(val / num_batches)
@@ -281,8 +290,7 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 if __name__ == '__main__':  
-    CACHE_ROOT_DIR = '/home/alireza' 
-    DATA_ROOT_DIR = '/data/alireza'
+
     dss = ['mvtec']
 
     parser = argparse.ArgumentParser("TIPSomaly", add_help=True)
@@ -302,19 +310,13 @@ if __name__ == '__main__':
     parser.add_argument("--dataset", type=str, nargs="+", default=[f'{ds}' for ds in dss], help="train dataset name")
     parser.add_argument("--dataset_category", type=str, default='', help="train dataset categories")
     
-    parser.add_argument("--class_name", type=str, nargs='+', default=['all'], help="train class name")
-    
-    parser.add_argument("--k_shot", type=int, default=0, help="number of samples per class for few-shot learning. 0 means use all data.")
-    
     parser.add_argument("--type", type=str, default='train') 
-    parser.add_argument("--log_dir", type=str, default="")
-    
-    parser.add_argument("--image_metrics", type=str, nargs='+', default=['auroc', 'ap', 'f1-max'], help="")
-    parser.add_argument("--pixel_metrics", type=str, nargs='+', default=['auroc', 'aupro', 'f1-max'], help="")
+    parser.add_argument("--class_name", type=str, nargs='+', default=['all'], help="train class name")
+    parser.add_argument("--k_shot", type=int, default=0, help="number of samples per class for few-shot learning. 0 means use all data.")
 
     ##########################
-    ### Method Arguements
-    parser.add_argument("--model_version", type=str, default='google/siglip2-large-patch16-512', choices=["s14h","b14h","l14h","so4h","g14l","g14h", \
+    ### Method Arguements ####
+    parser.add_argument("--model_version", type=str, default='l14h', choices=["s14h","b14h","l14h","so4h","g14l","g14h", \
                                                                                 "B/16", "L/16", "So400m/14", "So400m/16", "g-opt/16", \
                                                                                     "google/siglip2-so400m-patch16-256", "google/siglip2-large-patch16-512"])
     parser.add_argument("--n_deep_tokens", type=int, default=0)
@@ -323,9 +325,9 @@ if __name__ == '__main__':
     parser.add_argument("--fixed_prompt_type", type=str, default='industrial')
     
     parser.add_argument("--prompt_learn_method", type=str, default='concat', choices=['concat', 'sumate', 'entire_learnable', 'none'])
-    parser.add_argument("--cls_seg_los", type=str, default='both', choices=['both', 'seg', 'cls'])
+    parser.add_argument("--cls_seg_los", type=str, default='seg', choices=['both', 'seg', 'cls'])
     parser.add_argument("--l1_lambda", type=float, default=0.0)
-    parser.add_argument("--backbone_name", type=str, default='siglip2-hf', choices=["tips", "siglip2", "siglip2-hf"])
+    parser.add_argument("--backbone_name", type=str, default='tips', choices=["tips", "siglip2", "siglip2-hf"])
 
     args = parser.parse_args()        
     args.models_dir=f'{CACHE_ROOT_DIR}/.cache/{args.backbone_name}/'

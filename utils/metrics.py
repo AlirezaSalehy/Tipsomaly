@@ -12,7 +12,7 @@ def calc_f1_max(gt, pr):
 
 def cal_pro_score_gpu(masks, amaps, max_step=200, expect_fpr=0.3):
     # GPU implementation using PyTorch
-    device="cuda"
+    device="cpu"
     if not torch.is_tensor(amaps):
         amaps = torch.tensor(amaps)
     amaps = amaps.to(device)

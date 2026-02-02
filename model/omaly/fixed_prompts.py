@@ -46,21 +46,6 @@ def generate_prompt_templates(prompt_type):
                             '{} without defect',
                             '{} without damage']
         prompt_abnormal = ['damaged {}', 'broken {}', '{} with flaw', '{} with defect', '{} with damage']
-        prompt_templates = ['a photo of a {}.',
-                                'a photo of the {}.',
-                                'a cropped photo of a {}.',
-                                'a cropped photo of the {}.',
-                                'a close-up photo of a {}',
-                                'a close-up photo of the {}',
-                                'a photo of the {} for visual inspection',
-                                'a photo of a {} for visual inspection',
-                                ]
-        
-    elif prompt_type == 'industrial_stupid':
-        prompt_normal = ['{}', 'flawless {}', 'perfect {}', 'unblemished {}', '{} without flaw',
-                            '{} without defect',
-                            '{} without damage']
-        prompt_abnormal = ['damaged {}', 'broken {}', '{} with flaw', '{} with defect', '{} with damage']
         prompt_templates = ['a bad photo of a {}.',
                             'a low resolution photo of the {}.',
                             'a bad photo of the {}.',
