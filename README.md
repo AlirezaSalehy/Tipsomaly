@@ -1,4 +1,4 @@
-# TipsOmaly (ICASSP 2026)
+# Tipsomaly (ICASSP 2026)
 
 Official PyTorch implementation of [TIPS Over Tricks: Simple Prompts for Effective Zero-shot Anomaly Detection](https://arxiv.org/abs/2602.03594) — a spatially-aware zero-shot anomaly detection pipeline built on the [TIPS](https://arxiv.org/abs/2410.16512) vision-language model, using decoupled prompts and local evidence injection to improve image-level and pixel-level performance.
 
@@ -27,11 +27,11 @@ Anomaly detection identifies departures from expected behavior in safety-critica
 ---
 
 ## 📊 Results
-Across 14 industrial and medical benchmarks, TipsOmaly consistently outperforms prior CLIP-based zero-shot methods while remaining lightweight. The figure below summarizes its performance across datasets.
+Across 14 industrial and medical benchmarks, Tipsomaly consistently outperforms prior CLIP-based zero-shot methods while remaining lightweight. The figure below summarizes its performance across datasets.
 
 ![Results](imgs/results-table.png)
 
-We compare pixel-level anomaly maps from Tipsomaly with prior CLIP-based methods (AdaCLIP and AnomalyCLIP) on industrial and medical samples. As shown in the following figure, TipsOmaly more accurately localizes anomalous regions across both domains.
+We compare pixel-level anomaly maps from Tipsomaly with prior CLIP-based methods (AdaCLIP and AnomalyCLIP) on industrial and medical samples. As shown in the following figure, Tipsomaly more accurately localizes anomalous regions across both domains.
 
 ![Qualitative-results](imgs/Qualitative_results_page-0001.jpg)
 
