@@ -27,9 +27,7 @@ from utils.logger import get_logger, read_train_args
 from transformers import AutoProcessor, AutoModel, AutoTokenizer, SiglipTextModel, SiglipVisionModel
 from model.siglip2.siglip2_prompt_learnable import SiglipTextModelWithPromptLearning
 
-from . import CACHE_ROOT_DIR, DATA_ROOT_DIR
-
-####################3
+####################
 
 from model.big_vision import load_siglip
 
@@ -137,8 +135,9 @@ def test(args):
     
     if args.checkpoint_path:
         assert not args.prompt_learn_method == 'none', 'The prompt_learn_method should not be none'
-        chekpoint = torch.load(args.params_path, weights_only=False)
-        text_encoder.learnable_prompts = chekpoint["learnable_prompts"]
+        checkpoint = torch.load(args.params_path, weights_only=False)
+        text_encoder.learnable_prompts = checkpoint["learnable_prompts"] if isinstance(checkpoint, dict) else checkpoint
+
         # text_encoder.learnable_prompts = chekpoint
         # text_encoder.deep_parameters = chekpoint["deep_parameters"]
         
@@ -262,6 +261,8 @@ if __name__ == '__main__':
     parser.add_argument("--metrics", type=str, default='image-pixel-level')
     parser.add_argument("--devices", type=int, nargs='+', default=[0, 1, 2, 3, 4, 5, 6, 7], help="array of possible cuda devices")
     parser.add_argument("--model_name", type=str, default="trained_on_visa_siglip2_both_mvtec", help="")
+    parser.add_argument("--models_dir", type=str, default="./tips", help="directory of the base model of tips")
+    parser.add_argument("--data_root_dir", type=str, default="./datasets", help="root directory for all datasets to be placed in")
     parser.add_argument("--checkpoint_path", type=str, default='None', help="")
     parser.add_argument("--epoch", type=int, default=1, help="")
 
@@ -298,7 +299,6 @@ if __name__ == '__main__':
     parser.add_argument("--aggregate_local2global", type=str2bool, default=True)
     
     args = parser.parse_args()
-    args.models_dir=f'{CACHE_ROOT_DIR}/.cache/{args.backbone_name}/'
 
     if 'CUDA_VISIBLE_DEVICES' not in os.environ:
         os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, args.devices))
@@ -314,7 +314,7 @@ if __name__ == '__main__':
         # base_paths = [Path(p) for p in [f'{DATA_ROOT_DIR}/{args.dataset_category}/{args.dataset}/']]
         # args.data_path = [str(next(p.iterdir())) for p in base_paths]
         
-        args.data_path = [f'{DATA_ROOT_DIR}/datasets/{args.dataset_category}/{args.dataset}/']
+        args.data_path = [f'{args.data_root_dir}/{args.dataset_category}/{args.dataset}/']
         if not args.checkpoint_path:
             args.log_dir = make_human_readable_name(args)
             args.save_path = f'./workspaces/{args.model_name}/{args.log_dir}/quantative/NoTrain/{args.dataset}'
