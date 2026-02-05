@@ -104,7 +104,7 @@ def test(args):
     logger = get_logger(args.save_path)
     # load dataset 
 
-    device = 'cpu'
+    device = args.device
     if args.backbone_name == 'tips':
         bb_vision_encoder, bb_text_encoder, text_embd_dim, tokenizer, transform, target_transform, temperature = create_tips(args, device)
         calc_score = lambda vis_feat, txt_feat: calc_soft_score(vis_feat, txt_feat, temperature)
@@ -122,7 +122,7 @@ def test(args):
 
     # class_names = desc.dataset_dict[args.dataset]
     test_data = dataset.Dataset(args.data_path, transform, target_transform, args)
-    test_loader = DataLoader(test_data, num_workers=0)
+    test_loader = DataLoader(test_data, batch_size=args.batch_size, num_workers=4, shuffle=False)
     # test_loader = DataLoader(test_data, batch_size=8, shuffle=False, num_workers=1, prefetch_factor=2, pin_memory=True)
     fixed_class_names = [clss.replace('_', ' ') for clss in test_data.cls_names]
     
@@ -206,7 +206,7 @@ def test(args):
 
         for px_mtr in args.pixel_metrics:
             if not px_mtr == '':
-                cls_results.append(pixel_level_metrics(pxl_prds, pxl_lbls, px_mtr)*100)
+                cls_results.append(pixel_level_metrics(device, pxl_prds, pxl_lbls, px_mtr)*100)
             
         for im_mtr in args.image_metrics:
             for col in range(img_prds.shape[1]):
@@ -230,7 +230,7 @@ def test(args):
     
 def make_human_readable_name(args, exclude=['model_name', 'dataset', 'dataset_category', 'data_path',
                                             'checkpoint_path', 'training_path', "Timestamp",
-                                            "metrics", "devices", "epochs", "visualize", 'help', None]):
+                                            "metrics", "device", "available_devices", "epochs", "visualize", 'help', None]):
     args=vars(args)
     name_value_pairs = [
         f"{k}_{v}"
@@ -259,12 +259,14 @@ if __name__ == '__main__':
     parser.add_argument("--seed", type=int, default=111, help="random seed")
 
     parser.add_argument("--metrics", type=str, default='image-pixel-level')
-    parser.add_argument("--devices", type=int, nargs='+', default=[0, 1, 2, 3, 4, 5, 6, 7], help="array of possible cuda devices")
+    parser.add_argument("--device", type=str, default="cuda", help="type of device, can be cuda or cpu")
+    parser.add_argument("--available_devices", type=int, nargs='+', default=[0, 1, 2, 3, 4, 5, 6, 7], help="array of possible cuda devices")
     parser.add_argument("--model_name", type=str, default="trained_on_visa_siglip2_both_mvtec", help="")
     parser.add_argument("--models_dir", type=str, default="./tips", help="directory of the base model of tips")
     parser.add_argument("--data_root_dir", type=str, default="./datasets", help="root directory for all datasets to be placed in")
     parser.add_argument("--checkpoint_path", type=str, default='None', help="")
     parser.add_argument("--epoch", type=int, default=1, help="")
+    parser.add_argument("--batch_size", type=int, default=8)
 
     parser.add_argument("--sigma", type=int, default=4, help="zero shot")
     
@@ -301,7 +303,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if 'CUDA_VISIBLE_DEVICES' not in os.environ:
-        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, args.devices))
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, args.available_devices)) if len(args.available_devices) > 1 else str(args.available_devices[0])
         command = [sys.executable, __file__, ] + sys.argv[1:] 
         process = subprocess.Popen(command, env=os.environ)
         process.wait()

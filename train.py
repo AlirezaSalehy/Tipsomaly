@@ -124,7 +124,7 @@ def turn_gradient_off(model):
 
 def train(args):
     epochs = args.epoch
-    device = 'cpu'
+    device = args.device
 
     writer = SummaryWriter(log_dir=args.experiment_root)
     logger = get_logger(args.experiment_root)
@@ -267,7 +267,7 @@ def train(args):
         
 def make_human_readable_name(args, exclude=['model_name', 'dataset', 'dataset_category', 'epoch', 'data_path',
                                             'checkpoint_path', 'training_path', "Timestamp",
-                                            "metrics", "devices", "epochs", "visualize", 'help', None]):
+                                            "metrics", "device", "available_devices", "epochs", "visualize", 'help', None]):
     args=vars(args)
     name_value_pairs = [
         f"{k}_{v}"
@@ -302,7 +302,8 @@ if __name__ == '__main__':
     parser.add_argument("--learning_rate", type=float, default=0.001)
 
     parser.add_argument("--metrics", type=str, default='image-pixel-level')
-    parser.add_argument("--devices", type=int, nargs='+', default=[0, 1, 2, 3, 4, 5, 6, 7], help="array of possible cuda devices")
+    parser.add_argument("--device", type=str, default="cuda", help="type of device, can be cuda or cpu")
+    parser.add_argument("--available_devices", type=int, nargs='+', default=[0, 1, 2, 3, 4, 5, 6, 7], help="array of possible cuda devices")
     parser.add_argument("--model_name", type=str, default="tips_test", help="cuda device")
 
     parser.add_argument("--sigma", type=int, default=4, help="zero shot")
@@ -334,7 +335,7 @@ if __name__ == '__main__':
 
     command = [sys.executable, __file__, ] + sys.argv[1:] 
     if 'CUDA_VISIBLE_DEVICES' not in os.environ:
-        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, args.devices)) if len(args.devices) > 1 else str(args.devices[0])
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, args.available_devices)) if len(args.available_devices) > 1 else str(args.available_devices[0])
         process = subprocess.Popen(command, env=os.environ)
         process.wait()
         

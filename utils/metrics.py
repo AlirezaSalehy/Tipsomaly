@@ -10,9 +10,8 @@ def calc_f1_max(gt, pr):
     return np.max(f1_scores[np.isfinite(f1_scores)])
 
 
-def cal_pro_score_gpu(masks, amaps, max_step=200, expect_fpr=0.3):
+def cal_pro_score_gpu(device, masks, amaps, max_step=200, expect_fpr=0.3):
     # GPU implementation using PyTorch
-    device="cpu"
     if not torch.is_tensor(amaps):
         amaps = torch.tensor(amaps)
     amaps = amaps.to(device)
@@ -62,7 +61,7 @@ def image_level_metrics(prd, lbl, metric):
         performance = calc_f1_max(lbl, prd)
     return performance
 
-def pixel_level_metrics(prd, lbl, metric):
+def pixel_level_metrics(device, prd, lbl, metric):
     if torch.unique(lbl).numel() < 2:
         print("only one class present, can not calculate pixel metrics")
         return 0
@@ -75,7 +74,7 @@ def pixel_level_metrics(prd, lbl, metric):
             lbl = lbl.squeeze(1)
         if len(prd.shape) == 4:
             prd = prd.squeeze(1)
-        performance = cal_pro_score_gpu(lbl, prd)
+        performance = cal_pro_score_gpu(device, lbl, prd)
         
     elif metric == 'ap':     
         performance = AveragePrecision(task="binary")(prd, lbl.to(dtype=torch.long)).item()

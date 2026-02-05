@@ -17,10 +17,10 @@ for dataset in visa mpdd btad sdd dagm dtd; do
 done
 
 for dataset in isic tn3k cvc-colondb cvc-clinicdb; do
-    python test.py --checkpoint_path ./workspaces/trained_on_mvtec_$model_name/$log_dir/checkpoints  --dataset $dataset --dataset_category med --devices $device --fixed_prompt_type industrial --epoch $epoch --model_version $model_version
+    python test.py --checkpoint_path ./workspaces/trained_on_mvtec_$model_name/$log_dir/checkpoints  --dataset $dataset --devices $device --fixed_prompt_type industrial --epoch $epoch --model_version $model_version
 done
 
 # Using medical prompts
 for dataset in headct brainmri br35h; do
-    python test.py --checkpoint_path ./workspaces/trained_on_mvtec_$model_name/$log_dir/checkpoints  --dataset $dataset --dataset_category med --devices $device --fixed_prompt_type medical --epoch $epoch --model_version $model_version
+    python test.py --checkpoint_path ./workspaces/trained_on_mvtec_$model_name/$log_dir/checkpoints  --dataset $dataset --devices $device --fixed_prompt_type medical --epoch $epoch --model_version $model_version
 done

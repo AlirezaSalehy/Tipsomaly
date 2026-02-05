@@ -75,7 +75,7 @@ class Dataset(data.Dataset):
                 self.data_all = sampled_sets[1] 
         
         self.length = len(self.data_all)
-        print(f"number of train samples: {self.length}")
+        print(f"number of dataset samples: {self.length}")
             
     def _process_image(self, data):
         img_path, mask_path, cls_name, specie_name, anomaly = data['img_path'], data['mask_path'], \
