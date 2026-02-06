@@ -12,8 +12,8 @@ Official PyTorch implementation of [TIPS Over Tricks: Simple Prompts for Effecti
 - [📍 Checkpoints](#-checkpoints)
 - [🔧 Setup](#-setup)
 - [🗂️ Datasets](#️-datasets)
+- [🛠️ Training](#️-training)
 - [⚖️ License](#️-license)
-<!-- - [🛠️ Training](#️-training) -->
 <!-- - [🔗 Citation](#-citation) -->
 <!-- - [🙏 Acknowledgements](#-acknowledgements) -->
 
@@ -105,10 +105,11 @@ data-root/
 ├── ....
 ....
 ```
-<!-- 
-## 🛠️ Training
 
-## 🔗 Citation
+## 🛠️ Training  
+You can use our ready-to-run [Kaggle notebook](https://www.kaggle.com/code/sepehrnoey/tipsomaly-train) to train your model and test on your desired dataset. Steps to prepare the datasets and downloading the base model components can be found at the [Setup](#-setup) section. You can also find the commands to train the model and test multiple datasets in a loop in the [train_test.sh](train_test.sh)
+
+<!-- ## 🔗 Citation
 
 ## 🙏 Acknowledgements -->
 

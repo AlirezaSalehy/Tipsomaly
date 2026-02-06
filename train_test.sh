@@ -23,7 +23,7 @@ python train.py --models_dir $models_dir --model_name $model_name --data_root_di
 #     python test.py --models_dir $models_dir --checkpoint_path $checkpoint_path --data_root_dir $data_root_dir --dataset $dataset --epoch $epoch --model_version $model_version --fixed_prompt_type industrial
 # done
 
-# Medical segmentation datasets - using learned prompts (templates)
+# Medical segmentation datasets - using learned prompts
 # for dataset in isic tn3k cvc-colondb cvc-clinicdb; do
 #     python test.py --models_dir $models_dir --checkpoint_path $checkpoint_path --data_root_dir $data_root_dir --dataset $dataset --fixed_prompt_type industrial --epoch $epoch --model_version $model_version
 # done
