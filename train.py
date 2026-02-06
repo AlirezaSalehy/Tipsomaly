@@ -27,8 +27,6 @@ from model import omaly
 from model.big_vision import load_siglip
 from model.siglip2.siglip2_prompt_learnable import SiglipTextModelWithPromptLearning
 
-from . import CACHE_ROOT_DIR, DATA_ROOT_DIR
-
 loss_names = {'img_ls_ce': 'LS CE', 'pxl_ls_fc': 'LS FC', \
                 'plx_ls_dc_p': 'LS DC P', 'plx_ls_dc_n': 'LS DC N', \
                 'emb_l1_nrm': 'LS L1 NRM', 'epc_ls': 'total'}
@@ -117,7 +115,7 @@ def turn_gradient_off(model):
     for name, param in model.named_parameters():
         if param.requires_grad:
             enabled.add(name)
-    print(f"Parameters to be updated: {enabled}")
+    # print(f"Parameters to be updated: {enabled}")
 
     model.eval()
     return model
@@ -153,11 +151,7 @@ def train(args):
 
     g = torch.Generator()
     g.manual_seed(args.seed)
-    train_loader = DataLoader(train_data, num_workers=0)
-    # train_loader = DataLoader(train_data, batch_size=8, shuffle=True,  
-                                # num_workers=8, prefetch_factor=2, generator=g, worker_init_fn=seed_worker)    
-    # test_loader = DataLoader(test_data, batch_size=8, shuffle=False,
-                                # num_workers=8, pin_memory=True, prefetch_factor=2)
+    train_loader = DataLoader(train_data, batch_size=args.batch_size, num_workers=4, shuffle=False)
 
     # class_names = [clss.replace('_', ' ') for clss in train_data.cls_names]
     # class_ids = train_data.class_ids
@@ -244,9 +238,12 @@ def train(args):
             epoch_loss['emb_l1_nrm'] += l1_norm.item()
 
             # Tensorboard update for each batch
-            num_batches = len(train_loader)
-            for key, val in epoch_loss.items():
-                writer.add_scalar(f"Loss/{loss_names[key]}", val[-1], global_step)
+            writer.add_scalar(f"Loss/img_ls_ce", ls_cls.item(), global_step)
+            writer.add_scalar(f"Loss/pxl_ls_fc", ls_fc.item(), global_step)
+            writer.add_scalar(f"Loss/plx_ls_dc_p", ls_dc_p.item(), global_step)
+            writer.add_scalar(f"Loss/plx_ls_dc_n", ls_dc_n.item(), global_step)
+            writer.add_scalar(f"Loss/epc_ls", loss_total.item(), global_step)
+            writer.add_scalar(f"Loss/emb_l1_nrm", l1_norm.item(), global_step)
             global_step += 1
         
         # Calc epoch mean loss
@@ -305,10 +302,13 @@ if __name__ == '__main__':
     parser.add_argument("--device", type=str, default="cuda", help="type of device, can be cuda or cpu")
     parser.add_argument("--available_devices", type=int, nargs='+', default=[0, 1, 2, 3, 4, 5, 6, 7], help="array of possible cuda devices")
     parser.add_argument("--model_name", type=str, default="tips_test", help="cuda device")
+    parser.add_argument("--models_dir", type=str, default="./tips", help="directory of the base model of tips")
+    parser.add_argument("--data_root_dir", type=str, default="./datasets", help="root directory for all datasets to be placed in")
+    parser.add_argument("--batch_size", type=int, default=8)
 
     parser.add_argument("--sigma", type=int, default=4, help="zero shot")
     
-    parser.add_argument("--dataset", type=str, nargs="+", default=[f'{ds}' for ds in dss], help="train dataset name")
+    parser.add_argument("--dataset", type=str, default="visa")
     parser.add_argument("--dataset_category", type=str, default='', help="train dataset categories")
     
     parser.add_argument("--type", type=str, default='train') 
@@ -331,7 +331,6 @@ if __name__ == '__main__':
     parser.add_argument("--backbone_name", type=str, default='tips', choices=["tips", "siglip2", "siglip2-hf"])
 
     args = parser.parse_args()        
-    args.models_dir=f'{CACHE_ROOT_DIR}/.cache/{args.backbone_name}/'
 
     command = [sys.executable, __file__, ] + sys.argv[1:] 
     if 'CUDA_VISIBLE_DEVICES' not in os.environ:
@@ -343,8 +342,8 @@ if __name__ == '__main__':
         print(args)
         setup_seed(args.seed)
         args.log_dir = make_human_readable_name(args)
-        args.data_path = [f'{DATA_ROOT_DIR}/datasets/{args.dataset_category}/{ds}/' for ds in args.dataset]
-        args.experiment_root = f'./workspaces/trained_on_{"_".join(args.dataset)}_{args.model_name}/{args.log_dir}'
+        args.data_path = [f'{args.data_root_dir}/{args.dataset_category}/{args.dataset}/']
+        args.experiment_root = f'./workspaces/trained_on_{args.dataset}_{args.model_name}/{args.log_dir}'
         args.save_path = f'{args.experiment_root}/checkpoints'
         os.makedirs(args.save_path, exist_ok=True)
         

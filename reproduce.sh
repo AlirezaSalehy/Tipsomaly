@@ -8,14 +8,14 @@ checkpoint_path="/kaggle/working/checkpoints"
 
 ### Test using industrial fixed prompts
 
-# test TIPS on VisA (trained on MVTec)
+# test on VisA
 python test.py --models_dir $models_dir --checkpoint_path $checkpoint_path --data_root_dir $data_root_dir --dataset visa --epoch 2 --model_version $model_version --fixed_prompt_type industrial
 
-# test TIPS on MVTec (trained on VisA)
+# test on MVTec
 # python test.py --models_dir $models_dir --checkpoint_path $checkpoint_path --data_root_dir $data_root_dir --dataset mvtec --epoch 2 --model_version $model_version --fixed_prompt_type industrial
 
-# test TIPS on a medical dataset with industrial prompts
+# test on a medical dataset with industrial prompts
 # python test.py --models_dir $models_dir --checkpoint_path $checkpoint_path  --data_root_dir $data_root_dir --dataset cvc-colondb --fixed_prompt_type industrial --epoch 2 --model_version $model_version
 
-# test TIPS on a medical dataset with medical prompts
+# test on a medical dataset with medical prompts
 # python test.py --models_dir $models_dir --checkpoint_path $checkpoint_path  --data_root_dir $data_root_dir --dataset headct --fixed_prompt_type medical --epoch 2 --model_version $model_version
