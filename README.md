@@ -14,7 +14,7 @@ Official PyTorch implementation of [TIPS Over Tricks: Simple Prompts for Effecti
 - [🗂️ Datasets](#️-datasets)
 - [🛠️ Training](#️-training)
 - [⚖️ License](#️-license)
-<!-- - [🔗 Citation](#-citation) -->
+- [🔗 Citation](#-citation)
 <!-- - [🙏 Acknowledgements](#-acknowledgements) -->
 
 ---
@@ -109,9 +109,23 @@ data-root/
 ## 🛠️ Training  
 You can use our ready-to-run [Kaggle notebook](https://www.kaggle.com/code/sepehrnoey/tipsomaly-train) to train your model and test on your desired dataset. Steps to prepare the datasets and downloading the base model components can be found at the [Setup](#-setup) section. You can also find the commands to train the model and test multiple datasets in a loop in the [train_test.sh](train_test.sh)
 
-<!-- ## 🔗 Citation
+## 🔗 Citation
+If you find this project helpful for your research, please consider citing the following BibTeX entry.
 
-## 🙏 Acknowledgements -->
+
+<!-- 📚 [Paper Link](https://arxiv.org/pdf/2504.11055) -->
+
+**BibTeX:**
+```bibtex
+@article{salehi2026tips,
+  title={TIPS Over Tricks: Simple Prompts for Effective Zero-shot Anomaly Detection},
+  author={Salehi, Alireza and Karami, Ehsan and Noey, Sepehr and Noey, Sahand and Yamada, Makoto and Hosseini, Reshad and Sabokrou, Mohammad},
+  journal={arXiv preprint arXiv:2602.03594},
+  year={2026}
+}
+```
+
+<!-- ## 🙏 Acknowledgements -->
 
 ## ⚖️ License
 This project is licensed under the MIT License. Please refer to the [LICENSE](LICENSE) file for more information.
