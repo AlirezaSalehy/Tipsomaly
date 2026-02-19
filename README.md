@@ -71,7 +71,7 @@ mkdir data-root && mv mvtec visa data-root/
 models_dir="path/to/tips"
 data_root_dir="path/to/data-root"
 model_version='l14h' 
-checkpoint_path="path/to/checkpoints"
+checkpoint_path="./workspaces/trained_on_mvtec_default/vegan-arkansas/checkpoints"
 
 python test.py --models_dir $models_dir --checkpoint_path $checkpoint_path --data_root_dir $data_root_dir --dataset visa --epoch 2 --model_version $model_version --fixed_prompt_type industrial
 
