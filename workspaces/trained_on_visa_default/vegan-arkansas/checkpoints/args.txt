@@ -1,0 +1,23 @@
+
+Timestamp: 2025-08-24 02:44:06
+image_size: 518
+seed: 111
+metrics: image-pixel-level
+devices: [3]
+model_name: prompt_learning_segonly_518
+sigma: 4
+dataset: ['visa']
+dataset_category: 
+class_name: ['all']
+k_shot: 0
+type: train
+log_dir: vegan-arkansas
+image_metrics: ['auroc', 'ap', 'f1-max']
+pixel_metrics: ['auroc', 'aupro', 'f1-max']
+visualize: True
+prompt_learn_method: concat
+cls_seg_los: seg
+data_path: ['/data/alireza/datasets//visa/']
+experiment_root: ./workspaces/trained_on_visa_prompt_learning_segonly_518/vegan-arkansas
+save_path: ./workspaces/trained_on_visa_prompt_learning_segonly_518/vegan-arkansas/checkpoints
+Command arguments: /home/alireza/miniconda3/envs/cuda11_8torch2_5/bin/python /home/alireza/KyotoServer/CLIP-AD/tipsomaly/train.py --model_name prompt_learning_segonly_518 --dataset visa --device 3 --cls_seg_los seg

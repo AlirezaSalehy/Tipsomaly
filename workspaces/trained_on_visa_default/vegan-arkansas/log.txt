@@ -1,0 +1,2 @@
+25-08-24 02:49:49.051 - INFO: Epoch 1 Mean Losses: LS CE: 1.6292, LS FC: 0.0135, LS DC P: 0.9782, LS DC N: 0.0234,  Loss: 1.0151
+25-08-24 02:55:10.451 - INFO: Epoch 2 Mean Losses: LS CE: 1.7016, LS FC: 0.0139, LS DC P: 0.9251, LS DC N: 0.0069,  Loss: 0.9459

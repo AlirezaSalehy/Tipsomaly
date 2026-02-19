@@ -42,7 +42,7 @@ We compare pixel-level anomaly maps from Tipsomaly with prior CLIP-based methods
 Use our ready-to-run [Kaggle notebook](https://www.kaggle.com/code/sepehrnoey/tipsomaly-reproduction) to reproduce the results with the provided checkpoints.
 
 ## 📍 Checkpoints
-You can find our checkpoints trained on MVTec and VisA at [this link](https://drive.google.com/file/d/1yvgZYHFljFkGwTD0DYOdrZ_95ZbmjDcC/view?usp=sharing).
+You can find our checkpoints trained on MVTec and VisA in the directory [workspaces](./workspaces/) or on google drive at [this link](https://drive.google.com/file/d/1yvgZYHFljFkGwTD0DYOdrZ_95ZbmjDcC/view?usp=sharing).
 
 ---
 

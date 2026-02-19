@@ -4,7 +4,8 @@
 models_dir="/kaggle/working/tips"
 data_root_dir="/kaggle/working/datasets"
 model_version='l14h' # model version name, like s14h, l14h, g14h for TIPS model and google/siglip2-large-patch16-512 for SigLIP2 model 
-checkpoint_path="/kaggle/working/checkpoints"
+checkpoint_path="./workspaces/trained_on_mvtec_default/vegan-arkansas/checkpoints"
+# visa checkpoint at: './workspaces/trained_on_visa_default/vegan-arkansas/checkpoints'
 
 ### Test using industrial fixed prompts
 
