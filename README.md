@@ -1,6 +1,6 @@
-# Tipsomaly (ICASSP 2026)
+# Tipsomaly (ICASSP 2026) — [arXiv](https://arxiv.org/abs/2602.03594) | [IEEE](https://ieeexplore.ieee.org/document/11461758)
 
-Official PyTorch implementation of [TIPS Over Tricks: Simple Prompts for Effective Zero-shot Anomaly Detection (arXiv)](https://arxiv.org/abs/2602.03594) | [IEEE](https://ieeexplore.ieee.org/document/11461758) — a spatially-aware zero-shot anomaly detection pipeline built on the [TIPS](https://arxiv.org/abs/2410.16512) vision-language model, using decoupled prompts and local evidence injection to improve image-level and pixel-level performance.
+Official PyTorch implementation of `TIPS Over Tricks: Simple Prompts for Effective Zero-shot Anomaly Detection` — a spatially-aware zero-shot anomaly detection pipeline built on the [TIPS](https://arxiv.org/abs/2410.16512) vision-language model, using decoupled prompts and local evidence injection to improve image-level and pixel-level performance.
 
 ---
 
